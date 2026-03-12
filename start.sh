@@ -15,6 +15,20 @@ export KATAGO_MODEL="${KATAGO_MODEL:-./models/model.bin.gz}"
 export KATAGO_CONFIG="${KATAGO_CONFIG:-./config/gtp.cfg}"
 export PORT="${PORT:-5000}"
 
+# ── Pre-flight checks ──────────────────────────────────────────────────────
+if [ ! -f "$KATAGO_PATH" ]; then
+  echo "ERROR: KataGo binary not found: $KATAGO_PATH" >&2
+  echo "       Run './install_katago.sh' to install it." >&2
+  exit 1
+fi
+
+if [ ! -f "$KATAGO_MODEL" ]; then
+  echo "ERROR: KataGo model not found: $KATAGO_MODEL" >&2
+  echo "       Run './install_katago.sh' to download it." >&2
+  exit 1
+fi
+# ──────────────────────────────────────────────────────────────────────────
+
 echo "Starting web Go server on port ${PORT}..."
 echo "  KataGo:  $KATAGO_PATH"
 echo "  Model:   $KATAGO_MODEL"

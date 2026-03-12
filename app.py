@@ -258,4 +258,16 @@ def _handle_game_over(response):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+
+    # Start KataGo eagerly so the first game has no cold-start delay.
+    # In debug mode the reloader spawns a child process; only start there.
+    if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        try:
+            katago = KataGoGTP()
+            katago.start()
+            logger.info("KataGo started successfully.")
+        except KataGoError as e:
+            logger.error("Could not start KataGo: %s", e)
+            katago = None
+
     app.run(host="0.0.0.0", port=port, debug=debug)

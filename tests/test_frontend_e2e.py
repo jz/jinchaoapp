@@ -76,6 +76,62 @@ def test_new_game_button_starts_game(page):
         raise
 
 
+def test_game_runs_10_rounds(page):
+    """Start a 9x9 game and verify it sustains at least 10 rounds (human move + AI response each)."""
+    import json as _json
+    _headers = {"Content-Type": "application/json"}
+
+    resp = page.request.post(
+        f"{BASE_URL}/api/new_game",
+        data=_json.dumps({"board_size": 9, "human_color": "black"}),
+        headers=_headers,
+    )
+    if not resp.ok or not resp.json().get("game", {}).get("running"):
+        pytest.skip("KataGo not running — cannot start game")
+
+    # Candidate moves spread across the 9x9 board
+    candidates = [
+        "A1", "I9", "A9", "I1",
+        "E5",
+        "C3", "G3", "C7", "G7",
+        "E1", "E9", "A5", "I5",
+        "B2", "H8", "B8", "H2",
+        "D4", "F6", "D6", "F4",
+    ]
+
+    occupied = set()
+    rounds = 0
+
+    for vertex in candidates:
+        if rounds >= 10:
+            break
+        if vertex in occupied:
+            continue
+
+        resp = page.request.post(
+            f"{BASE_URL}/api/play",
+            data=_json.dumps({"vertex": vertex}),
+            headers=_headers,
+        )
+        if not resp.ok:
+            continue  # illegal move — try next candidate
+
+        data = resp.json()
+        game = data.get("game", {})
+        for move in game.get("move_history", []):
+            occupied.add(move["vertex"])
+
+        rounds += 1
+        if game.get("game_over"):
+            break
+
+    assert rounds >= 10, f"Game ended after only {rounds} rounds"
+
+    status = page.request.get(f"{BASE_URL}/api/status").json()
+    total_moves = len(status["game"]["move_history"])
+    assert total_moves >= 20, f"Expected >= 20 total moves, got {total_moves}"
+
+
 def test_api_status_endpoint(page):
     import json
     resp = page.request.get(f"{BASE_URL}/api/status")
