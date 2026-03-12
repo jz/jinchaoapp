@@ -1,0 +1,204 @@
+/* === Reset & Base === */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: #1a1a1a;
+  color: #e8e8e8;
+  min-height: 100vh;
+}
+
+/* === Layout === */
+#app {
+  display: flex;
+  gap: 24px;
+  padding: 24px;
+  min-height: 100vh;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* === Board Panel === */
+#board-panel {
+  position: relative;
+  flex-shrink: 0;
+}
+
+#goboard {
+  display: block;
+  border-radius: 4px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+#thinking-indicator {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  pointer-events: none;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* === Side Panel === */
+#side-panel {
+  width: 260px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: #888;
+  margin-top: -16px;
+}
+
+h2 {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #aaa;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #333;
+}
+
+section {
+  background: #252525;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+/* === Form controls === */
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #bbb;
+  margin-bottom: 10px;
+}
+
+select, input[type="number"] {
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #e8e8e8;
+  padding: 6px 8px;
+  font-size: 14px;
+  width: 100%;
+  appearance: none;
+}
+
+select:focus, input:focus {
+  outline: none;
+  border-color: #6b9f6b;
+}
+
+/* === Buttons === */
+.btn {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  text-align: center;
+}
+
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-primary  { background: #4a8f4a; color: #fff; }
+.btn-primary:hover  { opacity: 0.88; }
+.btn-secondary { background: #555; color: #fff; }
+.btn-secondary:hover { opacity: 0.88; }
+.btn-danger   { background: #8f3a3a; color: #fff; }
+.btn-danger:hover   { opacity: 0.88; }
+.btn-outline  { background: transparent; color: #aaa; border: 1px solid #444; margin-top: 6px; }
+.btn-outline:hover  { border-color: #888; color: #ddd; }
+
+.btn-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.btn-group .btn { flex: 1; }
+
+/* === Info rows === */
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 3px 0;
+}
+.info-row .label { color: #999; }
+.info-row .value { color: #e8e8e8; font-weight: 600; }
+
+/* === Result === */
+.result-text {
+  font-size: 26px;
+  font-weight: 700;
+  text-align: center;
+  color: #f0c060;
+  padding: 10px 0;
+}
+
+/* === Move log === */
+#move-log {
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 12px;
+  color: #aaa;
+  font-family: monospace;
+  line-height: 1.7;
+}
+
+#move-log::-webkit-scrollbar { width: 4px; }
+#move-log::-webkit-scrollbar-track { background: #1a1a1a; }
+#move-log::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+/* === Toast === */
+#toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: #333;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  transition: transform 0.3s ease;
+  pointer-events: none;
+  z-index: 100;
+}
+
+#toast.show {
+  transform: translateX(-50%) translateY(0);
+}
+
+/* === Utility === */
+.hidden { display: none !important; }

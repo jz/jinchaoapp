@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>网页围棋 · KataGo</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+  <!-- Left: board -->
+  <div id="board-panel">
+    <canvas id="goboard"></canvas>
+    <div id="thinking-indicator" class="hidden">AI 思考中…</div>
+  </div>
+
+  <!-- Right: controls -->
+  <div id="side-panel">
+    <h1>网页围棋</h1>
+    <p class="subtitle">引擎：KataGo Eigen (CPU)</p>
+
+    <!-- New game settings -->
+    <section id="setup-section">
+      <h2>新对局</h2>
+
+      <label>棋盘大小
+        <select id="board-size">
+          <option value="19" selected>19×19</option>
+          <option value="13">13×13</option>
+          <option value="9">9×9</option>
+        </select>
+      </label>
+
+      <label>我执
+        <select id="human-color">
+          <option value="black" selected>黑棋（先手）</option>
+          <option value="white">白棋（后手）</option>
+        </select>
+      </label>
+
+      <label>贴目 (komi)
+        <input id="komi" type="number" value="7.5" step="0.5" min="0" max="15" />
+      </label>
+
+      <button id="btn-new-game" class="btn btn-primary">开始对局</button>
+    </section>
+
+    <!-- In-game controls -->
+    <section id="game-section" class="hidden">
+      <h2>对局中</h2>
+
+      <div class="info-row">
+        <span class="label">我执：</span>
+        <span id="info-human-color" class="value">—</span>
+      </div>
+      <div class="info-row">
+        <span class="label">当前手：</span>
+        <span id="info-turn" class="value">—</span>
+      </div>
+      <div class="info-row">
+        <span class="label">提子（黑）：</span>
+        <span id="info-cap-black" class="value">0</span>
+      </div>
+      <div class="info-row">
+        <span class="label">提子（白）：</span>
+        <span id="info-cap-white" class="value">0</span>
+      </div>
+      <div class="info-row">
+        <span class="label">手数：</span>
+        <span id="info-moves" class="value">0</span>
+      </div>
+
+      <div class="btn-group">
+        <button id="btn-pass" class="btn btn-secondary">虚手 (Pass)</button>
+        <button id="btn-resign" class="btn btn-danger">认输 (Resign)</button>
+      </div>
+
+      <button id="btn-end-game" class="btn btn-outline">结束本局</button>
+    </section>
+
+    <!-- Result -->
+    <section id="result-section" class="hidden">
+      <h2>对局结果</h2>
+      <p id="result-text" class="result-text">—</p>
+      <button id="btn-again" class="btn btn-primary">再来一局</button>
+    </section>
+
+    <!-- Move log -->
+    <section id="log-section">
+      <h2>棋谱</h2>
+      <div id="move-log"></div>
+    </section>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="game.js"></script>
+</body>
+</html>
