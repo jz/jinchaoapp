@@ -21,4 +21,10 @@ echo "  Model:   $KATAGO_MODEL"
 echo "  Config:  $KATAGO_CONFIG"
 echo ""
 
-exec python3 app.py
+# Prefer venv python if available
+PYTHON=python3
+if [ -f ./venv/bin/python3 ]; then
+  PYTHON=./venv/bin/python3
+fi
+
+exec "$PYTHON" app.py
