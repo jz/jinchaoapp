@@ -12,6 +12,11 @@ venv/
 katago_bin/
 models/
 
+# Node (tunnel tools, not part of project)
+node_modules/
+package.json
+package-lock.json
+
 # OS
 .DS_Store
 Thumbs.db
