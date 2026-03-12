@@ -91,7 +91,12 @@ install_katago() {
       cd "$SRC_DIR"
 
       echo "    Running cmake..."
-      cmake . -DUSE_BACKEND=EIGEN -DCMAKE_CXX_FLAGS="-O3" 2>&1 | tail -5
+      # On FreeBSD, libatomic ships with gcc14 — pass its location to the linker
+      GCC_LIB=$(find /usr/local/lib -maxdepth 2 -name "libatomic.a" 2>/dev/null \
+                  | head -n1 | xargs dirname 2>/dev/null || echo "")
+      EXTRA_LDFLAGS="${GCC_LIB:+-L${GCC_LIB}}"
+      cmake . -DUSE_BACKEND=EIGEN -DCMAKE_CXX_FLAGS="-O3" \
+              -DCMAKE_EXE_LINKER_FLAGS="$EXTRA_LDFLAGS" 2>&1 | tail -5
 
       echo "    Building (this may take a few minutes)..."
       NPROC=$(sysctl -n hw.ncpu 2>/dev/null || echo 1)
