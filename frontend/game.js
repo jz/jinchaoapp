@@ -108,11 +108,14 @@ function draw() {
   ctx.strokeStyle = LINE_COLOR;
   ctx.lineWidth = 1;
   for (let i = 0; i < n; i++) {
-    const { x, y } = cellToXY(i, 0);
-    const { x: x2 } = cellToXY(i, n - 1);
-    const { y: y2 } = cellToXY(n - 1, i);
+    // horizontal line: row i, from col 0 to col n-1
+    const { x, y }   = cellToXY(i, 0);
+    const { x: x2 }  = cellToXY(i, n - 1);
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y2); ctx.stroke();
+    // vertical line: col i, from row 0 to row n-1
+    const { x: xv, y: yv } = cellToXY(0, i);
+    const { y: y2 }        = cellToXY(n - 1, i);
+    ctx.beginPath(); ctx.moveTo(xv, yv); ctx.lineTo(xv, y2); ctx.stroke();
   }
 
   // Hoshi (star points)
@@ -342,11 +345,13 @@ async function sendMove(vertex) {
   setControls(false);
   showThinking(true);
 
+  // Show the human stone immediately — don't wait for AI response
+  placeStoneFromGTP(state.humanColor, vertex);
+  draw();
+
   try {
     const data = await apiPost("/api/play", { vertex });
 
-    // Apply human move visually
-    placeStoneFromGTP(state.humanColor, vertex);
     appendLog(state.humanColor, vertex, state.moveHistory.length + 1);
     state.moveHistory.push({ color: state.humanColor, vertex });
 
@@ -365,9 +370,13 @@ async function sendMove(vertex) {
     setControls(true);
     draw();
   } catch (e) {
+    // Undo optimistic stone placement on error
+    const cell = gtpToCell(vertex, state.boardSize);
+    if (cell) state.stones[cell.row][cell.col] = null;
     showToast("落子失败：" + e.message);
     state.myTurn = true;
     setControls(true);
+    draw();
   } finally {
     showThinking(false);
   }
