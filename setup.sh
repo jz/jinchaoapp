@@ -79,7 +79,15 @@ install_katago() {
       echo "    Extracting..."
       tar -xzf "$BUILD_DIR/katago.tar.gz" -C "$BUILD_DIR"
 
-      SRC_DIR="$BUILD_DIR/KataGo-${KATAGO_VERSION}/cpp"
+      # KataGo cmake needs a git repo to generate gitinfoupdated.h
+      REPO_DIR="$BUILD_DIR/KataGo-${KATAGO_VERSION}"
+      git -C "$REPO_DIR" init -q
+      git -C "$REPO_DIR" add -A
+      git -C "$REPO_DIR" -c user.email="build@localhost" -c user.name="build" \
+        commit -q -m "tarball" --allow-empty
+      git -C "$REPO_DIR" tag "v${KATAGO_VERSION}"
+
+      SRC_DIR="$REPO_DIR/cpp"
       cd "$SRC_DIR"
 
       echo "    Running cmake..."

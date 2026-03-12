@@ -79,7 +79,14 @@ install_katago() {
         -o "$BUILD_DIR/katago.tar.gz" \
         "https://github.com/lightvector/KataGo/archive/refs/tags/v${KATAGO_VERSION}.tar.gz"
       tar -xzf "$BUILD_DIR/katago.tar.gz" -C "$BUILD_DIR"
-      SRC_DIR="$BUILD_DIR/KataGo-${KATAGO_VERSION}/cpp"
+      # KataGo cmake needs a git repo to generate gitinfoupdated.h
+      REPO_DIR="$BUILD_DIR/KataGo-${KATAGO_VERSION}"
+      git -C "$REPO_DIR" init -q
+      git -C "$REPO_DIR" add -A
+      git -C "$REPO_DIR" -c user.email="build@localhost" -c user.name="build" \
+        commit -q -m "tarball" --allow-empty
+      git -C "$REPO_DIR" tag "v${KATAGO_VERSION}"
+      SRC_DIR="$REPO_DIR/cpp"
       cd "$SRC_DIR"
       cmake . -DUSE_BACKEND=EIGEN -DCMAKE_CXX_FLAGS="-O2" 2>&1 | tail -5
       NPROC=$(nproc 2>/dev/null || echo 1)
