@@ -52,6 +52,7 @@ def static_files(filename):
 def api_status():
     return jsonify({
         "katago_running": katago is not None and katago.is_running(),
+        "katago_stderr": katago.get_stderr_tail() if katago else "",
         "game": game_state,
     })
 

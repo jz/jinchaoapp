@@ -49,13 +49,22 @@ class KataGoGTP:
             text=True,
             bufsize=1,
         )
+        self._stderr_lines = []
         self._reader_thread = threading.Thread(target=self._read_stdout, daemon=True)
         self._reader_thread.start()
         self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_thread.start()
-        # Give KataGo time to load the model
-        time.sleep(3)
-        logger.info("KataGo started.")
+
+        # Wait for KataGo to initialize, checking it doesn't crash
+        for i in range(10):
+            time.sleep(1)
+            if self.process.poll() is not None:
+                stderr_output = "\n".join(self._stderr_lines[-20:])
+                raise KataGoError(
+                    f"KataGo exited with code {self.process.returncode} during startup.\n"
+                    f"stderr:\n{stderr_output}"
+                )
+        logger.info("KataGo started (pid=%d).", self.process.pid)
 
     def stop(self):
         """Stop the KataGo process."""
@@ -69,6 +78,10 @@ class KataGoGTP:
 
     def is_running(self):
         return self.process is not None and self.process.poll() is None
+
+    def get_stderr_tail(self, n=20):
+        """Return the last n lines of KataGo stderr for debugging."""
+        return "\n".join(self._stderr_lines[-n:]) if hasattr(self, '_stderr_lines') else ""
 
     # ------------------------------------------------------------------ #
     # GTP commands
@@ -168,7 +181,12 @@ class KataGoGTP:
     def _drain_stderr(self):
         """Background thread: consume stderr so the pipe doesn't block."""
         for line in self.process.stderr:
-            logger.debug("katago stderr: %s", line.rstrip())
+            line = line.rstrip()
+            logger.debug("katago stderr: %s", line)
+            self._stderr_lines.append(line)
+            # Keep only the last 100 lines
+            if len(self._stderr_lines) > 100:
+                self._stderr_lines = self._stderr_lines[-50:]
 
     @staticmethod
     def _parse(raw):
