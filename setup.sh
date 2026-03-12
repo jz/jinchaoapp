@@ -117,8 +117,17 @@ install_model() {
 # ── Python deps ────────────────────────────────────────────────────────────
 install_python() {
   echo "==> Installing Python dependencies..."
-  pip3 install -r requirements.txt --quiet --break-system-packages 2>/dev/null \
-    || pip3 install -r requirements.txt --quiet
+  # FreeBSD uses python3.11 -m pip; Linux may have pip3 directly
+  if command -v pip3 >/dev/null 2>&1; then
+    pip3 install -r requirements.txt --quiet --break-system-packages 2>/dev/null \
+      || pip3 install -r requirements.txt --quiet
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -m pip install -r requirements.txt --quiet --break-system-packages 2>/dev/null \
+      || python3 -m pip install -r requirements.txt --quiet
+  else
+    echo "ERROR: python3 or pip3 not found" >&2
+    exit 1
+  fi
 }
 
 # ── .env ──────────────────────────────────────────────────────────────────
