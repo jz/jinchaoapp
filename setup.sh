@@ -7,9 +7,9 @@ set -eu
 # ── Config ─────────────────────────────────────────────────────────────────
 KATAGO_VERSION="1.15.3"
 
-# b6c96 network — very small (~3.5 MB), ~150 MB RAM. Good for 1 GB VPS.
-MODEL_FILE="kata1-b6c96-s175395328-d26217734.bin.gz"
-MODEL_URL="https://media.katagotraining.org/uploaded/networks/models/kata1/${MODEL_FILE}"
+# b18c384nbt human-style model (~99 MB download, ~300 MB RAM). Hosted on GitHub.
+MODEL_FILE="b18c384nbt-humanv0.bin.gz"
+MODEL_URL="https://github.com/lightvector/KataGo/releases/download/v1.15.0/${MODEL_FILE}"
 
 BIN_DIR="./katago_bin"
 MODEL_DIR="./models"
