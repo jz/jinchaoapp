@@ -1,12 +1,12 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # start.sh — Start the web Go server.
 
-set -euo pipefail
+set -eu
 
 # Load .env if present
 if [ -f .env ]; then
   set -a
-  source .env
+  . .env
   set +a
 fi
 
