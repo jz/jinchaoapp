@@ -14,8 +14,18 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder="frontend")
 
+# Difficulty presets: (humanSLProfile, maxVisits)
+DIFFICULTY = {
+    "beginner": ("rank_9k",  30),
+    "easy":     ("rank_5k",  80),
+    "medium":   ("rank_1d", 200),
+    "hard":     ("rank_9d", 500),
+}
+DEFAULT_DIFFICULTY = "easy"
+
 # Single global KataGo instance (one game at a time on a 1GB VPS)
 katago: KataGoGTP | None = None
+current_profile: str | None = None
 game_state: dict = {
     "running": False,
     "board_size": 19,
@@ -59,25 +69,33 @@ def api_status():
 
 @app.route("/api/new_game", methods=["POST"])
 def api_new_game():
-    global katago, game_state
+    global katago, game_state, current_profile
 
     data = request.get_json(silent=True) or {}
     board_size = int(data.get("board_size", 19))
     human_color = data.get("human_color", "black").lower()
     komi = float(data.get("komi", 7.5))
+    difficulty = data.get("difficulty", DEFAULT_DIFFICULTY).lower()
 
     if board_size not in (9, 13, 19):
         return jsonify({"error": "board_size must be 9, 13, or 19"}), 400
     if human_color not in ("black", "white"):
         return jsonify({"error": "human_color must be 'black' or 'white'"}), 400
+    if difficulty not in DIFFICULTY:
+        difficulty = DEFAULT_DIFFICULTY
 
+    profile, visits = DIFFICULTY[difficulty]
     ai_color = "white" if human_color == "black" else "black"
 
-    # Start or reuse KataGo
+    # (Re)start KataGo if not running or if the difficulty profile changed
     try:
-        if katago is None:
-            katago = KataGoGTP()
+        if katago is None or not katago.is_running() or profile != current_profile:
+            if katago is not None:
+                katago.stop()
+            katago = KataGoGTP(profile_override=profile)
             katago.start()
+            current_profile = profile
+        katago.set_visits(visits)
         katago.new_game(board_size=board_size, komi=komi)
     except KataGoError as e:
         return jsonify({"error": str(e)}), 500
@@ -94,6 +112,7 @@ def api_new_game():
         "game_over": False,
         "result": None,
         "consecutive_passes": 0,
+        "difficulty": difficulty,
     })
 
     response = {"status": "ok", "game": game_state}
@@ -263,8 +282,10 @@ if __name__ == "__main__":
     # In debug mode the reloader spawns a child process; only start there.
     if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         try:
-            katago = KataGoGTP()
+            default_profile, _ = DIFFICULTY[DEFAULT_DIFFICULTY]
+            katago = KataGoGTP(profile_override=default_profile)
             katago.start()
+            current_profile = default_profile
             logger.info("KataGo started successfully.")
         except KataGoError as e:
             logger.error("Could not start KataGo: %s", e)

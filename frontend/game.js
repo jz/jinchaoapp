@@ -274,12 +274,13 @@ async function startNewGame() {
   const boardSize   = parseInt(document.getElementById("board-size").value, 10);
   const humanColor  = document.getElementById("human-color").value;
   const komi        = parseFloat(document.getElementById("komi").value);
+  const difficulty  = document.getElementById("difficulty").value;
 
   btnNewGame.disabled = true;
   showThinking(true);
 
   try {
-    const data = await apiPost("/api/new_game", { board_size: boardSize, human_color: humanColor, komi });
+    const data = await apiPost("/api/new_game", { board_size: boardSize, human_color: humanColor, komi, difficulty });
 
     state.boardSize   = boardSize;
     state.humanColor  = humanColor;

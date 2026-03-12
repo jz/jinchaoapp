@@ -18,10 +18,11 @@ class KataGoError(Exception):
 
 
 class KataGoGTP:
-    def __init__(self):
+    def __init__(self, profile_override: str | None = None):
         self.katago_path = os.environ.get("KATAGO_PATH", "./katago_bin/katago")
         self.model_path = os.environ.get("KATAGO_MODEL", "./models/model.bin.gz")
         self.config_path = os.environ.get("KATAGO_CONFIG", "./config/gtp.cfg")
+        self.profile_override = profile_override  # e.g. "rank_9k"
         self.process = None
         self.response_queue = queue.Queue()
         self.lock = threading.Lock()
@@ -40,6 +41,8 @@ class KataGoGTP:
             "-model", self.model_path,
             "-config", self.config_path,
         ]
+        if self.profile_override:
+            cmd += ["-override-config", f"humanSLProfile={self.profile_override}"]
         logger.info("Starting KataGo: %s", " ".join(cmd))
         self.process = subprocess.Popen(
             cmd,
@@ -86,6 +89,10 @@ class KataGoGTP:
     # ------------------------------------------------------------------ #
     # GTP commands
     # ------------------------------------------------------------------ #
+
+    def set_visits(self, max_visits: int):
+        """Dynamically change the search visit count (affects strength & speed)."""
+        self._cmd(f"kata-set-param maxVisits {max_visits}")
 
     def new_game(self, board_size=19, komi=7.5):
         """Reset the board for a new game."""
