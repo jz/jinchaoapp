@@ -43,6 +43,7 @@ const resultSection = document.getElementById("result-section");
 
 const btnNewGame  = document.getElementById("btn-new-game");
 const btnPass     = document.getElementById("btn-pass");
+const btnUndo     = document.getElementById("btn-undo");
 const btnResign   = document.getElementById("btn-resign");
 const btnEndGame  = document.getElementById("btn-end-game");
 const btnAgain    = document.getElementById("btn-again");
@@ -347,6 +348,41 @@ async function humanPass() {
   await sendMove("PASS");
 }
 
+async function humanUndo() {
+  if (!state.gameRunning || state.gameOver) return;
+  if (state.moveHistory.length < 2) return;
+
+  setControls(false);
+  showThinking(true);
+
+  try {
+    const data = await apiPost("/api/undo", {});
+
+    // Remove last 2 entries from local history and move log
+    state.moveHistory.splice(-2);
+    for (let i = 0; i < 2; i++) {
+      const last = moveLog.lastElementChild;
+      if (last) moveLog.removeChild(last);
+    }
+
+    syncBoardStones(data.board_stones);
+
+    // Update lastMove indicator to the new last move
+    const hist = data.game.move_history || [];
+    const lastEntry = hist[hist.length - 1];
+    state.lastMove = lastEntry ? gtpToCell(lastEntry.vertex, state.boardSize) : null;
+
+    state.myTurn = data.game.turn === state.humanColor;
+    updateInfo(data.game);
+    draw();
+  } catch (e) {
+    showToast("悔棋失败：" + e.message);
+  } finally {
+    showThinking(false);
+    setControls(true);
+  }
+}
+
 async function humanResign() {
   if (!state.gameRunning || state.gameOver) return;
   try {
@@ -455,6 +491,7 @@ function appendLog(color, vertex, num) {
 
 function setControls(enabled) {
   btnPass.disabled   = !enabled;
+  btnUndo.disabled   = !enabled || state.moveHistory.length < 2;
   btnResign.disabled = !enabled;
 }
 
@@ -519,6 +556,7 @@ canvas.addEventListener("touchend", (e) => {
 
 btnNewGame.addEventListener("click", startNewGame);
 btnPass.addEventListener("click", humanPass);
+btnUndo.addEventListener("click", humanUndo);
 btnResign.addEventListener("click", humanResign);
 
 btnEndGame.addEventListener("click", () => {

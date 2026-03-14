@@ -195,6 +195,45 @@ def api_pass():
     return api_play_vertex("PASS")
 
 
+@app.route("/api/undo", methods=["POST"])
+def api_undo():
+    """Undo the last human move + AI response (2 half-moves)."""
+    global game_state
+    if not game_state["running"]:
+        return jsonify({"error": "No game in progress"}), 400
+
+    history = game_state["move_history"]
+    if len(history) < 2:
+        return jsonify({"error": "Nothing to undo"}), 400
+
+    try:
+        for _ in range(2):
+            ok = katago.undo()
+            if not ok:
+                return jsonify({"error": "Undo failed"}), 500
+            game_state["move_history"].pop()
+    except KataGoError as e:
+        return jsonify({"error": str(e)}), 500
+
+    game_state["turn"] = game_state["human_color"]
+
+    # Recalculate consecutive passes from remaining history
+    passes = 0
+    for move in reversed(game_state["move_history"]):
+        if move["vertex"].upper() == "PASS":
+            passes += 1
+        else:
+            break
+    game_state["consecutive_passes"] = passes
+
+    response = {"status": "ok", "game": game_state}
+    try:
+        response["board_stones"] = katago.get_board_stones()
+    except Exception:
+        pass
+    return jsonify(response)
+
+
 @app.route("/api/resign", methods=["POST"])
 def api_resign():
     """Human resigns."""
