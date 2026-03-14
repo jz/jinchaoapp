@@ -32,6 +32,7 @@ let state = {
   hoverCell: null,
   deadStones: [],      // GTP vertices judged dead after scoring
   territory: { black: [], white: [] },  // GTP vertices of each color's territory
+  vsHuman: false,      // true = local two-player mode
 };
 
 // --- DOM refs ---
@@ -51,6 +52,8 @@ const btnEndGame  = document.getElementById("btn-end-game");
 const btnAgain    = document.getElementById("btn-again");
 
 const infoHumanColor = document.getElementById("info-human-color");
+const labelMode      = document.getElementById("label-mode");
+const difficultyGroup = document.getElementById("difficulty-group");
 const infoTurn       = document.getElementById("info-turn");
 const infoCapBlack   = document.getElementById("info-cap-black");
 const infoCapWhite   = document.getElementById("info-cap-white");
@@ -171,7 +174,8 @@ function draw() {
       const r = cellSize * 0.46;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = state.humanColor === "black" ? HOVER_BLACK : HOVER_WHITE;
+      const hoverColor = state.vsHuman ? state.turn : state.humanColor;
+      ctx.fillStyle = hoverColor === "black" ? HOVER_BLACK : HOVER_WHITE;
       ctx.fill();
     }
   }
@@ -329,22 +333,24 @@ function syncBoardStones(boardStones) {
 }
 
 async function startNewGame() {
-  const boardSize   = parseInt(document.getElementById("board-size").value, 10);
-  const humanColor  = document.getElementById("human-color").value;
-  const komi        = parseFloat(document.getElementById("komi").value);
-  const difficulty  = document.getElementById("difficulty").value;
+  const boardSize  = parseInt(document.getElementById("board-size").value, 10);
+  const humanColor = document.getElementById("human-color").value;
+  const komi       = parseFloat(document.getElementById("komi").value);
+  const difficulty = document.getElementById("difficulty").value;
+  const mode       = document.getElementById("game-mode").value;
 
   btnNewGame.disabled = true;
   showThinking(true);
 
   try {
-    const data = await apiPost("/api/new_game", { board_size: boardSize, human_color: humanColor, komi, difficulty });
+    const data = await apiPost("/api/new_game", { board_size: boardSize, human_color: humanColor, komi, difficulty, mode });
 
     state.boardSize   = boardSize;
     state.humanColor  = humanColor;
     state.aiColor     = data.game.ai_color;
     state.turn        = data.game.turn;
-    state.myTurn      = (data.game.turn === humanColor);
+    state.vsHuman     = (mode === "vs_human");
+    state.myTurn      = state.vsHuman || (data.game.turn === humanColor);
     state.gameRunning = true;
     state.gameOver    = false;
     state.lastMove    = null;
@@ -361,10 +367,15 @@ async function startNewGame() {
     resultSection.classList.add("hidden");
     moveLog.innerHTML = "";
 
-    infoHumanColor.textContent = humanColor === "black" ? "⚫ 黑棋" : "⚪ 白棋";
+    if (state.vsHuman) {
+      labelMode.textContent      = "模式：";
+      infoHumanColor.textContent = "双人对弈";
+    } else {
+      labelMode.textContent      = "我执：";
+      infoHumanColor.textContent = humanColor === "black" ? "⚫ 黑棋" : "⚪ 白棋";
+    }
     updateInfo(data.game);
 
-    // AI may have already moved (if AI plays black)
     if (data.ai_move) {
       applyAIMove(data.ai_move);
     }
@@ -379,7 +390,8 @@ async function startNewGame() {
 }
 
 async function humanPlay(row, col) {
-  if (!state.myTurn || !state.gameRunning || state.gameOver) return;
+  if (!state.gameRunning || state.gameOver) return;
+  if (!state.myTurn) return;
   if (state.stones[row][col]) return;  // occupied
 
   const vertex = cellToGTP(row, col, state.boardSize);
@@ -387,7 +399,7 @@ async function humanPlay(row, col) {
 }
 
 async function humanPass() {
-  if (!state.myTurn || !state.gameRunning || state.gameOver) return;
+  if (!state.gameRunning || state.gameOver || !state.myTurn) return;
   await sendMove("PASS");
 }
 
@@ -401,9 +413,10 @@ async function humanUndo() {
   try {
     const data = await apiPost("/api/undo", {});
 
-    // Remove last 2 entries from local history and move log
-    state.moveHistory.splice(-2);
-    for (let i = 0; i < 2; i++) {
+    // Remove last 1 (vs_human) or 2 (vs_ai) entries
+    const n = state.vsHuman ? 1 : 2;
+    state.moveHistory.splice(-n);
+    for (let i = 0; i < n; i++) {
       const last = moveLog.lastElementChild;
       if (last) moveLog.removeChild(last);
     }
@@ -415,7 +428,8 @@ async function humanUndo() {
     const lastEntry = hist[hist.length - 1];
     state.lastMove = lastEntry ? gtpToCell(lastEntry.vertex, state.boardSize) : null;
 
-    state.myTurn = data.game.turn === state.humanColor;
+    state.turn   = data.game.turn;
+    state.myTurn = state.vsHuman || (data.game.turn === state.humanColor);
     updateInfo(data.game);
     draw();
   } catch (e) {
@@ -439,25 +453,26 @@ async function humanResign() {
 async function sendMove(vertex) {
   state.myTurn = false;
   setControls(false);
-  showThinking(true);
+  showThinking(!state.vsHuman);   // no spinner in vs_human (instant response)
 
-  // Show the human stone immediately — don't wait for AI response
-  placeStoneFromGTP(state.humanColor, vertex);
+  // Show the stone immediately for the current player
+  const colorPlayed = state.vsHuman ? state.turn : state.humanColor;
+  placeStoneFromGTP(colorPlayed, vertex);
   draw();
 
   try {
     const data = await apiPost("/api/play", { vertex });
 
-    appendLog(state.humanColor, vertex, state.moveHistory.length + 1);
-    state.moveHistory.push({ color: state.humanColor, vertex });
+    appendLog(colorPlayed, vertex, state.moveHistory.length + 1);
+    state.moveHistory.push({ color: colorPlayed, vertex });
 
     updateInfo(data.game);
 
-    if (data.ai_move) {
+    if (!state.vsHuman && data.ai_move) {
       applyAIMove(data.ai_move);
     }
 
-    // Sync authoritative board state (removes captured stones)
+    // Sync authoritative board state (handles captures)
     syncBoardStones(data.board_stones);
 
     if (data.game.game_over) {
@@ -465,7 +480,8 @@ async function sendMove(vertex) {
       return;
     }
 
-    state.myTurn = data.game.turn === state.humanColor;
+    state.turn   = data.game.turn;
+    state.myTurn = state.vsHuman || (data.game.turn === state.humanColor);
     setControls(true);
     draw();
   } catch (e) {
@@ -548,8 +564,13 @@ function formatResult(result) {
 // ================================================================== //
 
 function updateInfo(game) {
-  const turnLabel = game.turn === state.humanColor ? "你" : "AI";
   const turnColor = game.turn === "black" ? "⚫" : "⚪";
+  let turnLabel;
+  if (state.vsHuman) {
+    turnLabel = game.turn === "black" ? "黑棋落子" : "白棋落子";
+  } else {
+    turnLabel = game.turn === state.humanColor ? "你" : "AI";
+  }
   infoTurn.textContent     = `${turnColor} ${turnLabel}`;
   infoCapBlack.textContent = game.captures?.black ?? 0;
   infoCapWhite.textContent = game.captures?.white ?? 0;
@@ -565,8 +586,9 @@ function appendLog(color, vertex, num) {
 }
 
 function setControls(enabled) {
+  const minUndo = state.vsHuman ? 1 : 2;
   btnPass.disabled   = !enabled;
-  btnUndo.disabled   = !enabled || state.moveHistory.length < 2;
+  btnUndo.disabled   = !enabled || state.moveHistory.length < minUndo;
   btnResign.disabled = !enabled;
 }
 
@@ -628,6 +650,10 @@ canvas.addEventListener("touchend", (e) => {
 // ================================================================== //
 // Button handlers
 // ================================================================== //
+
+document.getElementById("game-mode").addEventListener("change", (e) => {
+  difficultyGroup.classList.toggle("hidden", e.target.value === "vs_human");
+});
 
 btnNewGame.addEventListener("click", startNewGame);
 btnPass.addEventListener("click", humanPass);

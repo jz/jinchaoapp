@@ -39,14 +39,23 @@
         </select>
       </label>
 
-      <label>AI 难度
-        <select id="difficulty">
-          <option value="beginner">入门 — 最弱最快</option>
-          <option value="easy" selected>初级 — 弱（推荐）</option>
-          <option value="medium">中级 — 较强</option>
-          <option value="hard">高手 — 最强</option>
+      <label>对弈模式
+        <select id="game-mode">
+          <option value="vs_ai" selected>人机对弈（AI）</option>
+          <option value="vs_human">双人对弈（本地）</option>
         </select>
       </label>
+
+      <div id="difficulty-group">
+        <label>AI 难度
+          <select id="difficulty">
+            <option value="beginner">入门 — 最弱最快</option>
+            <option value="easy" selected>初级 — 弱（推荐）</option>
+            <option value="medium">中级 — 较强</option>
+            <option value="hard">高手 — 最强</option>
+          </select>
+        </label>
+      </div>
 
       <label>贴目 (komi)
         <input id="komi" type="number" value="7.5" step="0.5" min="0" max="15" />
@@ -60,7 +69,7 @@
       <h2>对局中</h2>
 
       <div class="info-row">
-        <span class="label">我执：</span>
+        <span class="label" id="label-mode">我执：</span>
         <span id="info-human-color" class="value">—</span>
       </div>
       <div class="info-row">

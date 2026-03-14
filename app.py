@@ -75,15 +75,18 @@ def api_new_game():
     global katago, game_state, current_profile
 
     data = request.get_json(silent=True) or {}
-    board_size = int(data.get("board_size", 19))
+    board_size  = int(data.get("board_size", 19))
     human_color = data.get("human_color", "black").lower()
-    komi = float(data.get("komi", 7.5))
-    difficulty = data.get("difficulty", DEFAULT_DIFFICULTY).lower()
+    komi        = float(data.get("komi", 7.5))
+    difficulty  = data.get("difficulty", DEFAULT_DIFFICULTY).lower()
+    mode        = data.get("mode", "vs_ai")  # "vs_ai" | "vs_human"
 
     if board_size not in (9, 13, 19):
         return jsonify({"error": "board_size must be 9, 13, or 19"}), 400
     if human_color not in ("black", "white"):
         return jsonify({"error": "human_color must be 'black' or 'white'"}), 400
+    if mode not in ("vs_ai", "vs_human"):
+        mode = "vs_ai"
     if difficulty not in DIFFICULTY:
         difficulty = DEFAULT_DIFFICULTY
 
@@ -104,24 +107,25 @@ def api_new_game():
         return jsonify({"error": str(e)}), 500
 
     game_state.update({
-        "running": True,
-        "board_size": board_size,
-        "komi": komi,
-        "human_color": human_color,
-        "ai_color": ai_color,
-        "turn": "black",
-        "move_history": [],
-        "captures": {"black": 0, "white": 0},
-        "game_over": False,
-        "result": None,
+        "running":            True,
+        "board_size":         board_size,
+        "komi":               komi,
+        "human_color":        human_color,
+        "ai_color":           ai_color,
+        "mode":               mode,
+        "turn":               "black",
+        "move_history":       [],
+        "captures":           {"black": 0, "white": 0},
+        "game_over":          False,
+        "result":             None,
         "consecutive_passes": 0,
-        "difficulty": difficulty,
+        "difficulty":         difficulty,
     })
 
     response = {"status": "ok", "game": game_state}
 
-    # If AI plays black, let it move first
-    if ai_color == "black":
+    # vs_ai: if AI plays black, let it move first
+    if mode == "vs_ai" and ai_color == "black":
         ai_result = _ai_move()
         if ai_result:
             response["ai_move"] = ai_result
@@ -144,43 +148,54 @@ def api_play():
     if not vertex:
         return jsonify({"error": "vertex required"}), 400
 
+    mode        = game_state.get("mode", "vs_ai")
     human_color = game_state["human_color"]
 
-    if game_state["turn"] != human_color:
+    # In vs_ai mode the turn must belong to the human player.
+    # In vs_human mode either player may play on their turn.
+    color_to_play = game_state["turn"] if mode == "vs_human" else human_color
+    if mode == "vs_ai" and game_state["turn"] != human_color:
         return jsonify({"error": "Not your turn"}), 400
 
-    # Play human move
     try:
-        ok = katago.play(human_color, vertex)
+        ok = katago.play(color_to_play, vertex)
     except KataGoError as e:
         return jsonify({"error": str(e)}), 500
 
     if not ok:
         return jsonify({"error": "Illegal move"}), 400
 
-    game_state["move_history"].append({"color": human_color, "vertex": vertex})
+    game_state["move_history"].append({"color": color_to_play, "vertex": vertex})
     if vertex.upper() == "PASS":
         game_state["consecutive_passes"] += 1
     else:
         game_state["consecutive_passes"] = 0
 
-    game_state["turn"] = game_state["ai_color"]
-
     response: dict = {"status": "ok", "move": vertex, "game": game_state}
 
     # Check double-pass (game over by agreement)
     if game_state["consecutive_passes"] >= 2:
+        game_state["turn"] = "black"   # reset for display
         return _handle_game_over(response)
 
-    # AI responds
+    if mode == "vs_human":
+        # Flip turn to the other player; no AI response needed.
+        game_state["turn"] = "white" if color_to_play == "black" else "black"
+        try:
+            response["board_stones"] = katago.get_board_stones()
+        except Exception:
+            pass
+        response["game"] = game_state
+        return jsonify(response)
+
+    # vs_ai: AI responds
+    game_state["turn"] = game_state["ai_color"]
     ai_result = _ai_move()
     if ai_result:
         response["ai_move"] = ai_result
         if ai_result.get("resign") or game_state.get("game_over"):
             return _handle_game_over(response)
 
-    # Always return the authoritative board position so the client can sync
-    # captures and any other rule-based stone removals.
     try:
         response["board_stones"] = katago.get_board_stones()
     except Exception:
@@ -285,17 +300,25 @@ def _compute_territory(board_size: int, alive_black: list, alive_white: list):
 
 @app.route("/api/undo", methods=["POST"])
 def api_undo():
-    """Undo the last human move + AI response (2 half-moves)."""
+    """Undo the last move(s).
+    vs_ai:    undo 2 half-moves (human + AI response).
+    vs_human: undo 1 half-move (the last stone played).
+    """
     global game_state
     if not game_state["running"]:
         return jsonify({"error": "No game in progress"}), 400
 
+    mode    = game_state.get("mode", "vs_ai")
+    n_undo  = 1 if mode == "vs_human" else 2
     history = game_state["move_history"]
-    if len(history) < 2:
+    if len(history) < n_undo:
         return jsonify({"error": "Nothing to undo"}), 400
 
+    # Record the color of the move about to be undone BEFORE popping
+    undone_color = history[-1]["color"] if history else "black"
+
     try:
-        for _ in range(2):
+        for _ in range(n_undo):
             ok = katago.undo()
             if not ok:
                 return jsonify({"error": "Undo failed"}), 500
@@ -303,7 +326,10 @@ def api_undo():
     except KataGoError as e:
         return jsonify({"error": str(e)}), 500
 
-    game_state["turn"] = game_state["human_color"]
+    if mode == "vs_human":
+        game_state["turn"] = undone_color   # let that player redo their move
+    else:
+        game_state["turn"] = game_state["human_color"]
 
     # Recalculate consecutive passes from remaining history
     passes = 0
