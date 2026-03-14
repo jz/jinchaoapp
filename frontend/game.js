@@ -30,6 +30,8 @@ let state = {
   lastMove: null,      // {row, col} or null
   moveHistory: [],
   hoverCell: null,
+  deadStones: [],      // GTP vertices judged dead after scoring
+  territory: { black: [], white: [] },  // GTP vertices of each color's territory
 };
 
 // --- DOM refs ---
@@ -54,6 +56,7 @@ const infoCapBlack   = document.getElementById("info-cap-black");
 const infoCapWhite   = document.getElementById("info-cap-white");
 const infoMoves      = document.getElementById("info-moves");
 const resultText     = document.getElementById("result-text");
+const resultDetail   = document.getElementById("result-detail");
 const moveLog        = document.getElementById("move-log");
 
 // ================================================================== //
@@ -125,11 +128,38 @@ function draw() {
   // Row/col labels
   drawLabels(n);
 
+  // Territory markers (shown after scoring)
+  const deadSet = new Set(state.deadStones.map(v => v.toUpperCase()));
+  if (state.territory.black.length || state.territory.white.length) {
+    const sq = Math.max(3, cellSize * 0.24);
+    for (const vertex of state.territory.black) {
+      const cell = gtpToCell(vertex, n);
+      if (!cell) continue;
+      const { x, y } = cellToXY(cell.row, cell.col);
+      ctx.fillStyle = "#111";
+      ctx.fillRect(x - sq, y - sq, sq * 2, sq * 2);
+    }
+    for (const vertex of state.territory.white) {
+      const cell = gtpToCell(vertex, n);
+      if (!cell) continue;
+      const { x, y } = cellToXY(cell.row, cell.col);
+      ctx.fillStyle = "#f0f0f0";
+      ctx.fillRect(x - sq, y - sq, sq * 2, sq * 2);
+      ctx.strokeStyle = "#999";
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(x - sq, y - sq, sq * 2, sq * 2);
+    }
+  }
+
   // Stones
   for (let r = 0; r < n; r++) {
     for (let c = 0; c < n; c++) {
       const s = state.stones[r] && state.stones[r][c];
-      if (s) drawStone(r, c, s, r === state.lastMove?.row && c === state.lastMove?.col);
+      if (s) {
+        const vertex  = cellToGTP(r, c, n);
+        const isDead  = deadSet.has(vertex.toUpperCase());
+        drawStone(r, c, s, r === state.lastMove?.row && c === state.lastMove?.col, isDead);
+      }
     }
   }
 
@@ -147,9 +177,11 @@ function draw() {
   }
 }
 
-function drawStone(row, col, color, isLast) {
+function drawStone(row, col, color, isLast, isDead) {
   const { x, y } = cellToXY(row, col);
   const r = cellSize * 0.46;
+
+  ctx.globalAlpha = isDead ? 0.35 : 1.0;
 
   // Shadow
   ctx.shadowColor = "rgba(0,0,0,0.4)";
@@ -175,9 +207,18 @@ function drawStone(row, col, color, isLast) {
   ctx.shadowBlur = 0;
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 0;
+  ctx.globalAlpha = 1.0;
 
-  // Last move dot
-  if (isLast) {
+  if (isDead) {
+    // Cross mark over dead stone
+    ctx.strokeStyle = color === "black" ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.7)";
+    ctx.lineWidth = Math.max(1.5, cellSize * 0.07);
+    const d = r * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(x - d, y - d); ctx.lineTo(x + d, y + d);
+    ctx.moveTo(x + d, y - d); ctx.lineTo(x - d, y + d);
+    ctx.stroke();
+  } else if (isLast) {
     ctx.beginPath();
     ctx.arc(x, y, r * 0.2, 0, Math.PI * 2);
     ctx.fillStyle = color === "black" ? "#aaa" : LAST_MOVE_DOT;
@@ -308,6 +349,8 @@ async function startNewGame() {
     state.gameOver    = false;
     state.lastMove    = null;
     state.moveHistory = [];
+    state.deadStones  = [];
+    state.territory   = { black: [], white: [] };
 
     initStones(boardSize);
     computeLayout(boardSize);
@@ -387,7 +430,7 @@ async function humanResign() {
   if (!state.gameRunning || state.gameOver) return;
   try {
     const data = await apiPost("/api/resign", {});
-    endGame(data.result || "认输");
+    endGame(data.result || "认输", null);
   } catch (e) {
     showToast("请求失败：" + e.message);
   }
@@ -418,7 +461,7 @@ async function sendMove(vertex) {
     syncBoardStones(data.board_stones);
 
     if (data.game.game_over) {
-      endGame(data.game.result || data.final_score || "");
+      endGame(data.game.result || data.final_score || "", null);
       return;
     }
 
@@ -442,7 +485,7 @@ function applyAIMove(aiMove) {
   const { color, vertex } = aiMove;
   if (aiMove.resign) {
     const winner = color === "black" ? "白" : "黑";
-    endGame(`${winner}胜（AI认输）`);
+    endGame(`${winner}胜（AI认输）`, null);
     return;
   }
   placeStoneFromGTP(color, vertex);
@@ -451,13 +494,45 @@ function applyAIMove(aiMove) {
   draw();
 }
 
-function endGame(result) {
+async function humanScore() {
+  if (!state.gameRunning && !state.gameOver) return;
+  setControls(false);
+  showThinking(true);
+  try {
+    const data = await apiPost("/api/score", {});
+    state.deadStones = data.dead_stones || [];
+    state.territory  = data.territory  || { black: [], white: [] };
+    syncBoardStones(data.board_stones);
+    endGame(data.result || "", data);
+  } catch (e) {
+    showToast("数棋失败：" + e.message);
+    setControls(true);
+  } finally {
+    showThinking(false);
+  }
+}
+
+function endGame(result, scoreData) {
   state.gameOver    = true;
   state.gameRunning = false;
   state.myTurn      = false;
   gameSection.classList.add("hidden");
   resultSection.classList.remove("hidden");
   resultText.textContent = formatResult(result);
+
+  // Detail line: dead stone counts + territory if available
+  if (scoreData && (scoreData.dead_stones || scoreData.territory)) {
+    const dead = (scoreData.dead_stones || []).length;
+    const bt   = (scoreData.territory?.black || []).length;
+    const wt   = (scoreData.territory?.white || []).length;
+    const parts = [];
+    if (dead > 0) parts.push(`死子 ${dead} 枚`);
+    if (bt > 0 || wt > 0) parts.push(`黑地 ${bt} 目，白地 ${wt} 目`);
+    resultDetail.textContent = parts.join("　");
+  } else {
+    resultDetail.textContent = "";
+  }
+
   draw();
 }
 
@@ -559,13 +634,7 @@ btnPass.addEventListener("click", humanPass);
 btnUndo.addEventListener("click", humanUndo);
 btnResign.addEventListener("click", humanResign);
 
-btnEndGame.addEventListener("click", () => {
-  state.gameRunning = false;
-  state.gameOver    = true;
-  gameSection.classList.add("hidden");
-  setupSection.classList.remove("hidden");
-  resultSection.classList.add("hidden");
-});
+btnEndGame.addEventListener("click", humanScore);
 
 btnAgain.addEventListener("click", () => {
   resultSection.classList.add("hidden");

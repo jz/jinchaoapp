@@ -166,6 +166,13 @@ select:focus, input:focus {
   padding: 10px 0;
 }
 
+.result-detail {
+  font-size: 12px;
+  text-align: center;
+  color: #999;
+  margin-bottom: 8px;
+}
+
 /* === Move log === */
 #move-log {
   max-height: 180px;

@@ -195,6 +195,36 @@ def api_pass():
     return api_play_vertex("PASS")
 
 
+@app.route("/api/score", methods=["POST"])
+def api_score():
+    """End the game and return final score + dead stones + territory."""
+    global game_state
+    if not game_state["running"] and not game_state.get("game_over"):
+        return jsonify({"error": "No game in progress"}), 400
+
+    try:
+        score       = katago.final_score()
+        dead        = katago.final_status_list("dead")
+        b_territory = katago.final_status_list("black_territory")
+        w_territory = katago.final_status_list("white_territory")
+        board_stones = katago.get_board_stones()
+    except KataGoError as e:
+        return jsonify({"error": str(e)}), 500
+
+    game_state["game_over"] = True
+    game_state["running"]   = False
+    game_state["result"]    = score
+
+    return jsonify({
+        "status":      "ok",
+        "result":      score,
+        "dead_stones": dead,
+        "territory":   {"black": b_territory, "white": w_territory},
+        "board_stones": board_stones,
+        "game":        game_state,
+    })
+
+
 @app.route("/api/undo", methods=["POST"])
 def api_undo():
     """Undo the last human move + AI response (2 half-moves)."""

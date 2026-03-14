@@ -207,6 +207,18 @@ class KataGoGTP:
         resp = self._cmd("final_score", timeout=30)
         return resp[0].strip() if resp else ""
 
+    def final_status_list(self, status: str) -> list:
+        """Return GTP vertices with the given final status.
+        status: 'dead' | 'alive' | 'seki' | 'black_territory' | 'white_territory' | 'dame'
+        """
+        resp = self._cmd(f"final_status_list {status}", timeout=60)
+        if resp is None:
+            return []
+        text, ok = resp
+        if not ok or not text.strip():
+            return []
+        return text.strip().split()
+
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
