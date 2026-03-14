@@ -97,20 +97,66 @@ class KataGoGTP:
     def get_board_stones(self) -> dict:
         """
         Return the current board position as two lists of GTP vertices.
-        Uses the standard GTP 'list_stones' command.
+        Parses the 'showboard' ASCII output since KataGo doesn't support 'list_stones'.
         Returns {"black": ["D4", ...], "white": ["C3", ...]}
         """
-        def _parse_vertices(resp):
-            if resp is None:
-                return []
-            text, ok = resp
-            if not ok or not text.strip():
-                return []
-            return text.strip().split()
+        resp = self._cmd("showboard")
+        if resp is None:
+            return {"black": [], "white": []}
+        text, ok = resp
+        if not ok:
+            return {"black": [], "white": []}
+        return self._parse_showboard(text)
 
-        black = _parse_vertices(self._cmd("list_stones black"))
-        white = _parse_vertices(self._cmd("list_stones white"))
-        return {"black": black, "white": white}
+    @staticmethod
+    def _parse_showboard(text: str) -> dict:
+        """
+        Parse KataGo showboard ASCII output to extract stone positions.
+        Board lines look like:
+          9 . . . . . . . . .
+          5 . . . . X1. . . .
+          3 . . O2. . . . . .
+        Column header looks like:
+             A B C D E F G H J
+        """
+        GTP_COLS = set("ABCDEFGHJKLMNOPQRST")
+        lines = text.strip().split("\n")
+
+        # Find header line (contains column letters, only spaces + column letters)
+        header_line = None
+        header_idx = None
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped and all(c in GTP_COLS or c == " " for c in stripped):
+                if "A" in stripped and "B" in stripped:
+                    header_line = line
+                    header_idx = i
+                    break
+
+        if header_line is None:
+            return {"black": [], "white": []}
+
+        # Map column letter -> exact character index in the line
+        col_positions = {ch: idx for idx, ch in enumerate(header_line) if ch in GTP_COLS}
+
+        black_stones, white_stones = [], []
+        for line in lines[header_idx + 1:]:
+            stripped = line.strip()
+            if not stripped:
+                break
+            parts = stripped.split()
+            if not parts or not parts[0].isdigit():
+                break
+            row_num = int(parts[0])
+            for col_letter, col_pos in col_positions.items():
+                if col_pos < len(line):
+                    ch = line[col_pos]
+                    if ch == "X":
+                        black_stones.append(f"{col_letter}{row_num}")
+                    elif ch == "O":
+                        white_stones.append(f"{col_letter}{row_num}")
+
+        return {"black": black_stones, "white": white_stones}
 
     def new_game(self, board_size=19, komi=7.5):
         """Reset the board for a new game."""
