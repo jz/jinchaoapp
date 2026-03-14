@@ -203,26 +203,84 @@ def api_score():
         return jsonify({"error": "No game in progress"}), 400
 
     try:
-        score       = katago.final_score()
-        dead        = katago.final_status_list("dead")
-        b_territory = katago.final_status_list("black_territory")
-        w_territory = katago.final_status_list("white_territory")
+        score        = katago.final_score()
+        dead         = katago.final_status_list("dead")
         board_stones = katago.get_board_stones()
     except KataGoError as e:
         return jsonify({"error": str(e)}), 500
+
+    # KataGo doesn't support black_territory/white_territory in final_status_list.
+    # Compute territory by flood-fill: remove dead stones, then find empty regions
+    # surrounded by only one color.
+    dead_set    = set(v.upper() for v in dead)
+    alive_black = [v for v in board_stones["black"] if v.upper() not in dead_set]
+    alive_white = [v for v in board_stones["white"] if v.upper() not in dead_set]
+    b_territory, w_territory = _compute_territory(
+        game_state["board_size"], alive_black, alive_white
+    )
 
     game_state["game_over"] = True
     game_state["running"]   = False
     game_state["result"]    = score
 
     return jsonify({
-        "status":      "ok",
-        "result":      score,
-        "dead_stones": dead,
-        "territory":   {"black": b_territory, "white": w_territory},
+        "status":       "ok",
+        "result":       score,
+        "dead_stones":  dead,
+        "territory":    {"black": b_territory, "white": w_territory},
         "board_stones": board_stones,
-        "game":        game_state,
+        "game":         game_state,
     })
+
+
+def _compute_territory(board_size: int, alive_black: list, alive_white: list):
+    """
+    Flood-fill territory counting.
+    Empty intersections (including dead-stone positions) surrounded only by
+    one color's alive stones are assigned to that color's territory.
+    Returns (black_territory_vertices, white_territory_vertices).
+    """
+    GTP_COLS = "ABCDEFGHJKLMNOPQRST"
+
+    def v2rc(v):
+        return board_size - int(v[1:]), GTP_COLS.index(v[0].upper())
+
+    def rc2v(r, c):
+        return GTP_COLS[c] + str(board_size - r)
+
+    grid = [["." for _ in range(board_size)] for _ in range(board_size)]
+    for v in alive_black:
+        r, c = v2rc(v); grid[r][c] = "B"
+    for v in alive_white:
+        r, c = v2rc(v); grid[r][c] = "W"
+
+    visited = [[False] * board_size for _ in range(board_size)]
+    b_territory, w_territory = [], []
+
+    for sr in range(board_size):
+        for sc in range(board_size):
+            if visited[sr][sc] or grid[sr][sc] != ".":
+                continue
+            region, borders, queue = [], set(), [(sr, sc)]
+            visited[sr][sc] = True
+            while queue:
+                r, c = queue.pop(0)
+                region.append((r, c))
+                for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < board_size and 0 <= nc < board_size:
+                        if not visited[nr][nc] and grid[nr][nc] == ".":
+                            visited[nr][nc] = True
+                            queue.append((nr, nc))
+                        elif grid[nr][nc] in ("B", "W"):
+                            borders.add(grid[nr][nc])
+            if borders == {"B"}:
+                b_territory.extend(rc2v(r, c) for r, c in region)
+            elif borders == {"W"}:
+                w_territory.extend(rc2v(r, c) for r, c in region)
+            # else: dame (neutral) — not assigned
+
+    return b_territory, w_territory
 
 
 @app.route("/api/undo", methods=["POST"])
