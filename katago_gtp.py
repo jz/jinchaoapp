@@ -94,6 +94,24 @@ class KataGoGTP:
         """Dynamically change the search visit count (affects strength & speed)."""
         self._cmd(f"kata-set-param maxVisits {max_visits}")
 
+    def get_board_stones(self) -> dict:
+        """
+        Return the current board position as two lists of GTP vertices.
+        Uses the standard GTP 'list_stones' command.
+        Returns {"black": ["D4", ...], "white": ["C3", ...]}
+        """
+        def _parse_vertices(resp):
+            if resp is None:
+                return []
+            text, ok = resp
+            if not ok or not text.strip():
+                return []
+            return text.strip().split()
+
+        black = _parse_vertices(self._cmd("list_stones black"))
+        white = _parse_vertices(self._cmd("list_stones white"))
+        return {"black": black, "white": white}
+
     def new_game(self, board_size=19, komi=7.5):
         """Reset the board for a new game."""
         self.board_size = board_size

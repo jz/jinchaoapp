@@ -176,6 +176,13 @@ def api_play():
         if ai_result.get("resign") or game_state.get("game_over"):
             return _handle_game_over(response)
 
+    # Always return the authoritative board position so the client can sync
+    # captures and any other rule-based stone removals.
+    try:
+        response["board_stones"] = katago.get_board_stones()
+    except Exception:
+        pass
+
     return jsonify(response)
 
 

@@ -270,6 +270,22 @@ function placeStoneFromGTP(color, vertex) {
   }
 }
 
+// Sync the full board position from the server response (handles captures).
+function syncBoardStones(boardStones) {
+  if (!boardStones) return;
+  const n = state.boardSize;
+  // Reset all stones
+  state.stones = Array.from({ length: n }, () => Array(n).fill(null));
+  for (const vertex of (boardStones.black || [])) {
+    const cell = gtpToCell(vertex, n);
+    if (cell) state.stones[cell.row][cell.col] = "black";
+  }
+  for (const vertex of (boardStones.white || [])) {
+    const cell = gtpToCell(vertex, n);
+    if (cell) state.stones[cell.row][cell.col] = "white";
+  }
+}
+
 async function startNewGame() {
   const boardSize   = parseInt(document.getElementById("board-size").value, 10);
   const humanColor  = document.getElementById("human-color").value;
@@ -361,6 +377,9 @@ async function sendMove(vertex) {
     if (data.ai_move) {
       applyAIMove(data.ai_move);
     }
+
+    // Sync authoritative board state (removes captured stones)
+    syncBoardStones(data.board_stones);
 
     if (data.game.game_over) {
       endGame(data.game.result || data.final_score || "");
