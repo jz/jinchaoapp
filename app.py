@@ -15,11 +15,14 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder="frontend")
 
 # Difficulty presets: (humanSLProfile, maxVisits)
+# Visits are kept low because the b18c384 model is large and CPU inference
+# is slow (~200-500 ms/visit on a 1 GB VPS). Rule of thumb: 1 visit ≈ 1 move
+# of look-ahead at this model size, so even 5 visits plays reasonably.
 DIFFICULTY = {
-    "beginner": ("rank_9k",  30),
-    "easy":     ("rank_5k",  80),
-    "medium":   ("rank_1d", 200),
-    "hard":     ("rank_9d", 500),
+    "beginner": ("rank_9k",   5),   # ~1-3 s
+    "easy":     ("rank_5k",  15),   # ~3-7 s
+    "medium":   ("rank_1d",  50),   # ~10-25 s
+    "hard":     ("rank_9d", 150),   # ~30-75 s
 }
 DEFAULT_DIFFICULTY = "easy"
 
