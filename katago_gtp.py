@@ -204,14 +204,14 @@ class KataGoGTP:
 
     def final_score(self):
         """Return the final score string, e.g. 'B+3.5'."""
-        resp = self._cmd("final_score", timeout=30)
+        resp = self._cmd("final_score", timeout=300)
         return resp[0].strip() if resp else ""
 
     def final_status_list(self, status: str) -> list:
         """Return GTP vertices with the given final status.
         status: 'dead' | 'alive' | 'seki' | 'black_territory' | 'white_territory' | 'dame'
         """
-        resp = self._cmd(f"final_status_list {status}", timeout=60)
+        resp = self._cmd(f"final_status_list {status}", timeout=300)
         if resp is None:
             return []
         text, ok = resp
@@ -223,14 +223,14 @@ class KataGoGTP:
     # Internal helpers
     # ------------------------------------------------------------------ #
 
-    def _cmd(self, command, timeout=30):
+    def _cmd(self, command, timeout=60):
         """Send a GTP command; return (value, success) or None on error."""
-        raw = self._send_raw(command)
+        raw = self._send_raw(command, timeout=timeout)
         if raw is None:
             return None
         return self._parse(raw)
 
-    def _send_raw(self, command):
+    def _send_raw(self, command, timeout=60):
         """Write a command line to KataGo stdin and wait for the response."""
         with self.lock:
             if not self.is_running():
@@ -241,7 +241,6 @@ class KataGoGTP:
             except BrokenPipeError:
                 raise KataGoError("KataGo process died")
             try:
-                timeout = 60
                 return self.response_queue.get(timeout=timeout)
             except queue.Empty:
                 raise KataGoError(f"KataGo did not respond to: {command}")
