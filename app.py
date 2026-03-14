@@ -1,9 +1,13 @@
 """
 Web Go game backend — Flask + KataGo GTP
 """
+from __future__ import annotations
 
 import os
+import re
+import json
 import logging
+from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 from dotenv import load_dotenv
 from katago_gtp import KataGoGTP, KataGoError
@@ -431,6 +435,234 @@ def _handle_game_over(response):
     game_state["running"] = False
     response["game"] = game_state
     return jsonify(response)
+
+
+# ------------------------------------------------------------------ #
+# Classic game replay
+# ------------------------------------------------------------------ #
+
+SGF_DIR = Path(__file__).parent / "sgf"
+_GTP_COLS = "ABCDEFGHJKLMNOPQRST"
+
+
+def _sgf_coord_to_gtp(xy: str, n: int) -> str:
+    """Convert a two-char SGF coordinate (e.g. 'pd') to a GTP vertex (e.g. 'Q16')."""
+    if not xy or len(xy) < 2:
+        return "PASS"
+    xy = xy.strip().lower()
+    if xy in ("tt", ""):
+        return "PASS"
+    c = ord(xy[0]) - ord("a")   # col: 0=left
+    r = ord(xy[1]) - ord("a")   # row: 0=top
+    if c < 0 or c >= n or r < 0 or r >= n:
+        return "PASS"
+    return f"{_GTP_COLS[c]}{n - r}"
+
+
+def _parse_sgf(text: str) -> dict:
+    """Recursive descent SGF parser — follows the main line (first child at each node).
+    Handles both flat SGF (all moves at depth 1) and CGoban-style commented SGF
+    where the main game continues inside nested (;...) branches.
+    """
+    pos = [0]
+    sz = len(text)
+
+    def skip() -> None:
+        while pos[0] < sz and text[pos[0]].isspace():
+            pos[0] += 1
+
+    def read_value() -> str:
+        """Read a [...] property value. pos[0] points at '['. Returns the inner string."""
+        pos[0] += 1  # skip '['
+        chars: list[str] = []
+        while pos[0] < sz and text[pos[0]] != "]":
+            if text[pos[0]] == "\\" and pos[0] + 1 < sz:
+                pos[0] += 1
+            chars.append(text[pos[0]])
+            pos[0] += 1
+        if pos[0] < sz:
+            pos[0] += 1  # skip ']'
+        return "".join(chars)
+
+    def read_node() -> dict:
+        """Parse a ;node. pos[0] points at ';'. Returns {KEY: [val, ...]} dict."""
+        pos[0] += 1  # skip ';'
+        props: dict = {}
+        skip()
+        while pos[0] < sz and text[pos[0]] not in (";", "(", ")"):
+            skip()
+            if pos[0] >= sz or text[pos[0]] in (";", "(", ")"):
+                break
+            key_start = pos[0]
+            while pos[0] < sz and text[pos[0]].isupper():
+                pos[0] += 1
+            key = text[key_start:pos[0]]
+            if not key:
+                pos[0] += 1
+                continue
+            vals: list[str] = []
+            skip()
+            while pos[0] < sz and text[pos[0]] == "[":
+                vals.append(read_value())
+                skip()
+            if vals:
+                props[key] = vals
+        return props
+
+    def skip_tree() -> None:
+        """Skip a complete (...) subtree. pos[0] must point at '('."""
+        pos[0] += 1  # skip '('
+        depth = 1
+        while pos[0] < sz and depth > 0:
+            ch = text[pos[0]]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            elif ch == "[":
+                pos[0] += 1
+                while pos[0] < sz and text[pos[0]] != "]":
+                    if text[pos[0]] == "\\":
+                        pos[0] += 1
+                    pos[0] += 1
+            pos[0] += 1
+
+    def read_tree() -> list:
+        """Parse a (game_tree). pos[0] must point at '('.
+        Always follows the FIRST child branch (main line); skips subsequent children.
+        Returns flat list of node-dicts for the main line."""
+        pos[0] += 1  # skip '('
+        nodes: list[dict] = []
+        skip()
+        while pos[0] < sz and text[pos[0]] != ")":
+            ch = text[pos[0]]
+            if ch == ";":
+                nodes.append(read_node())
+                skip()
+            elif ch == "(":
+                # First child = main-line continuation
+                nodes.extend(read_tree())
+                skip()
+                # Skip all remaining siblings (variations)
+                while pos[0] < sz and text[pos[0]] == "(":
+                    skip_tree()
+                    skip()
+                break  # sequence is finished after children
+            else:
+                pos[0] += 1
+        skip()
+        if pos[0] < sz and text[pos[0]] == ")":
+            pos[0] += 1
+        return nodes
+
+    # ── Entry point ──────────────────────────────────────────────────
+    skip()
+    if pos[0] >= sz or text[pos[0]] != "(":
+        return {"game_info": {}, "moves": []}
+    all_nodes = read_tree()
+    root = all_nodes[0] if all_nodes else {}
+
+    board_size = 19
+    if "SZ" in root:
+        try:
+            board_size = int(root["SZ"][0].split(":")[0])
+        except (ValueError, IndexError):
+            pass
+
+    komi = 7.5
+    if "KM" in root:
+        try:
+            komi = float(root["KM"][0])
+        except (ValueError, IndexError):
+            pass
+
+    game_info = {
+        "black":      (root.get("PB") or ["黑方"])[0],
+        "white":      (root.get("PW") or ["白方"])[0],
+        "black_rank": (root.get("BR") or [""])[0],
+        "white_rank": (root.get("WR") or [""])[0],
+        "result":     (root.get("RE") or [""])[0],
+        "event":      (root.get("EV") or [""])[0],
+        "date":       (root.get("DT") or [""])[0],
+        "komi":       komi,
+        "board_size": board_size,
+    }
+
+    moves = []
+    for node in all_nodes[1:]:  # skip root
+        color = vertex = None
+        comment = ""
+        if "B" in node:
+            color, vertex = "black", _sgf_coord_to_gtp(node["B"][0], board_size)
+        elif "W" in node:
+            color, vertex = "white", _sgf_coord_to_gtp(node["W"][0], board_size)
+        if "C" in node:
+            comment = node["C"][0].strip()
+        if color:
+            moves.append({"color": color, "vertex": vertex, "comment": comment})
+
+    return {"game_info": game_info, "moves": moves}
+
+
+@app.route("/api/games", methods=["GET"])
+def api_list_games():
+    """List available classic games from sgf/ directory."""
+    games = []
+    if not SGF_DIR.exists():
+        return jsonify({"status": "ok", "games": []})
+    for sgf_path in sorted(SGF_DIR.glob("*.sgf")):
+        game_id = sgf_path.stem
+        meta_path = sgf_path.with_suffix(".json")
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                meta["id"] = game_id
+                games.append(meta)
+                continue
+            except Exception:
+                pass
+        # Fall back to parsing SGF header
+        try:
+            gi = _parse_sgf(sgf_path.read_text(encoding="utf-8", errors="replace"))["game_info"]
+            games.append({
+                "id":         game_id,
+                "title":      f"{gi['black']} vs {gi['white']}",
+                "event":      gi.get("event", ""),
+                "date":       gi.get("date", ""),
+                "result":     gi.get("result", ""),
+                "board_size": gi.get("board_size", 19),
+            })
+        except Exception:
+            games.append({"id": game_id, "title": game_id})
+    return jsonify({"status": "ok", "games": games})
+
+
+@app.route("/api/games/<game_id>", methods=["GET"])
+def api_get_game(game_id):
+    """Return parsed moves + comments for one classic game."""
+    if not re.match(r"^[\w\-]+$", game_id):
+        return jsonify({"error": "invalid game id"}), 400
+    sgf_path = SGF_DIR / f"{game_id}.sgf"
+    if not sgf_path.exists():
+        return jsonify({"error": "game not found"}), 404
+    try:
+        text = sgf_path.read_text(encoding="utf-8", errors="replace")
+        data = _parse_sgf(text)
+        # Merge JSON metadata if present (for richer titles)
+        meta_path = sgf_path.with_suffix(".json")
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                data["game_info"].update({
+                    k: v for k, v in meta.items()
+                    if k in ("title", "event", "date", "result", "description")
+                })
+            except Exception:
+                pass
+        data["id"] = game_id
+        return jsonify({"status": "ok", "game": data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ------------------------------------------------------------------ #

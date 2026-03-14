@@ -167,11 +167,25 @@ select:focus, input:focus {
 }
 
 .result-detail {
-  font-size: 12px;
-  text-align: center;
-  color: #999;
   margin-bottom: 8px;
 }
+
+.score-table {
+  width: 100%; border-collapse: collapse;
+  font-size: 12px; margin: 6px 0 2px;
+}
+.score-table th {
+  color: #bbb; padding: 3px 4px 6px; text-align: center;
+  border-bottom: 1px solid #3a3a3a;
+}
+.score-table td { padding: 3px 4px; text-align: center; color: #ccc; }
+.score-table td:first-child { text-align: left; color: #888; font-size: 11px; }
+.score-table .komi-row td { color: #999; font-size: 11px; }
+.score-table .total-row td {
+  color: #f0c060; font-weight: 700;
+  border-top: 1px solid #3a3a3a; padding-top: 5px;
+}
+.dead-note { text-align: center; font-size: 11px; color: #777; margin-top: 4px; }
 
 /* === Move log === */
 #move-log {
@@ -205,6 +219,107 @@ select:focus, input:focus {
 
 #toast.show {
   transform: translateX(-50%) translateY(0);
+}
+
+/* === Classic Replay === */
+
+.replay-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.replay-header h2 { margin-bottom: 0; border-bottom: none; padding-bottom: 0; }
+
+.back-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.back-btn:hover { color: #ddd; }
+
+.game-list-item {
+  display: block;
+  width: 100%;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 9px 11px;
+  margin-bottom: 7px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.game-list-item:hover { border-color: #666; background: #2a2a2a; }
+.gli-title  { display: block; font-size: 13px; font-weight: 600; color: #e8e8e8; }
+.gli-event  { display: block; font-size: 11px; color: #888; margin-top: 2px; }
+.gli-foot   { display: flex; justify-content: space-between; margin-top: 3px; }
+.gli-date   { font-size: 11px; color: #666; }
+.gli-result { font-size: 12px; color: #f0c060; font-weight: 600; }
+.gli-desc   { display: block; font-size: 11px; color: #777; margin-top: 4px; line-height: 1.45; }
+
+.replay-loading { color: #666; font-size: 13px; text-align: center; padding: 10px 0; }
+
+.replay-players {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.replay-vs { color: #555; font-size: 11px; font-weight: 400; }
+
+.replay-meta { font-size: 11px; color: #777; margin-bottom: 7px; }
+
+.replay-progress {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #aaa;
+  margin-bottom: 5px;
+}
+
+.replay-comment {
+  background: #1a1a1a;
+  border-left: 2px solid #5a7a5a;
+  padding: 7px 9px;
+  font-size: 12px;
+  color: #bbb;
+  line-height: 1.55;
+  border-radius: 0 4px 4px 0;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.replay-comment::-webkit-scrollbar { width: 3px; }
+.replay-comment::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+.replay-nav {
+  display: flex;
+  gap: 6px;
+}
+.nav-btn {
+  flex: 1;
+  background: #2e2e2e;
+  border: 1px solid #444;
+  border-radius: 5px;
+  color: #ddd;
+  font-size: 15px;
+  padding: 7px 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.nav-btn:hover { background: #3a3a3a; }
+
+#replay-slider {
+  accent-color: #5a8a5a;
+  cursor: pointer;
 }
 
 /* === Utility === */

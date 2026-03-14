@@ -1,0 +1,8 @@
+{
+  "title": "AlphaGo vs 李世石 第1局",
+  "event": "谷歌DeepMind挑战赛",
+  "date": "2016-03-09",
+  "result": "W+R",
+  "board_size": 19,
+  "description": "AI对决人类的历史性首局，AlphaGo执黑，李世石执白，AlphaGo赢得胜利"
+}

@@ -62,6 +62,48 @@
       </label>
 
       <button id="btn-new-game" class="btn btn-primary">开始对局</button>
+      <button id="btn-go-replay" class="btn btn-outline" style="margin-top:6px">经典复盘</button>
+    </section>
+
+    <!-- Classic replay -->
+    <section id="replay-section" class="hidden">
+      <div class="replay-header">
+        <button id="btn-replay-back" class="back-btn">← 返回</button>
+        <h2>经典复盘</h2>
+      </div>
+
+      <!-- Game picker -->
+      <div id="replay-picker">
+        <div id="game-list"><p class="replay-loading">加载中…</p></div>
+      </div>
+
+      <!-- Replay controls (shown after a game is selected) -->
+      <div id="replay-controls" class="hidden">
+        <div class="replay-players">
+          <span id="replay-black">⚫ 黑方</span>
+          <span class="replay-vs">vs</span>
+          <span id="replay-white">⚪ 白方</span>
+        </div>
+        <div id="replay-meta" class="replay-meta"></div>
+
+        <div class="replay-progress">
+          <span id="replay-move-num">开局</span>
+          <span id="replay-total"></span>
+        </div>
+
+        <div id="replay-comment" class="replay-comment hidden"></div>
+
+        <div class="replay-nav">
+          <button class="nav-btn" id="btn-r-first" title="第一手">⏮</button>
+          <button class="nav-btn" id="btn-r-prev"  title="上一手">◀</button>
+          <button class="nav-btn" id="btn-r-next"  title="下一手">▶</button>
+          <button class="nav-btn" id="btn-r-last"  title="最后一手">⏭</button>
+        </div>
+        <button class="btn btn-secondary" id="btn-autoplay" style="margin-top:6px;font-size:13px">▶ 自动播放</button>
+        <input type="range" id="replay-slider" min="0" value="0" style="width:100%;margin-top:8px">
+
+        <button id="btn-pick-another" class="btn btn-outline" style="margin-top:8px;font-size:12px">← 选择其他棋局</button>
+      </div>
     </section>
 
     <!-- In-game controls -->
@@ -102,7 +144,7 @@
     <section id="result-section" class="hidden">
       <h2>对局结果</h2>
       <p id="result-text" class="result-text">—</p>
-      <p id="result-detail" class="result-detail"></p>
+      <div id="result-detail" class="result-detail"></div>
       <button id="btn-again" class="btn btn-primary">再来一局</button>
     </section>
 

@@ -111,6 +111,30 @@ function draw() {
   ctx.fillStyle = BOARD_BG;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  // Territory markers drawn BEFORE grid lines so lines appear on top
+  if (state.territory.black.length || state.territory.white.length) {
+    const half = cellSize * 0.5;
+    const dot  = Math.max(3, cellSize * 0.17);
+    for (const vertex of state.territory.black) {
+      const cell = gtpToCell(vertex, n); if (!cell) continue;
+      const { x, y } = cellToXY(cell.row, cell.col);
+      ctx.fillStyle = "rgba(15,15,15,0.42)";
+      ctx.fillRect(x - half, y - half, cellSize, cellSize);
+      ctx.fillStyle = "rgba(10,10,10,0.78)";
+      ctx.fillRect(x - dot,  y - dot,  dot * 2, dot * 2);
+    }
+    for (const vertex of state.territory.white) {
+      const cell = gtpToCell(vertex, n); if (!cell) continue;
+      const { x, y } = cellToXY(cell.row, cell.col);
+      ctx.fillStyle = "rgba(220,220,220,0.38)";
+      ctx.fillRect(x - half, y - half, cellSize, cellSize);
+      ctx.fillStyle = "rgba(225,225,225,0.85)";
+      ctx.fillRect(x - dot,  y - dot,  dot * 2, dot * 2);
+      ctx.strokeStyle = "rgba(160,160,160,0.7)"; ctx.lineWidth = 0.6;
+      ctx.strokeRect(x - dot, y - dot, dot * 2, dot * 2);
+    }
+  }
+
   // Grid lines
   ctx.strokeStyle = LINE_COLOR;
   ctx.lineWidth = 1;
@@ -131,28 +155,7 @@ function draw() {
   // Row/col labels
   drawLabels(n);
 
-  // Territory markers (shown after scoring)
   const deadSet = new Set(state.deadStones.map(v => v.toUpperCase()));
-  if (state.territory.black.length || state.territory.white.length) {
-    const sq = Math.max(3, cellSize * 0.24);
-    for (const vertex of state.territory.black) {
-      const cell = gtpToCell(vertex, n);
-      if (!cell) continue;
-      const { x, y } = cellToXY(cell.row, cell.col);
-      ctx.fillStyle = "#111";
-      ctx.fillRect(x - sq, y - sq, sq * 2, sq * 2);
-    }
-    for (const vertex of state.territory.white) {
-      const cell = gtpToCell(vertex, n);
-      if (!cell) continue;
-      const { x, y } = cellToXY(cell.row, cell.col);
-      ctx.fillStyle = "#f0f0f0";
-      ctx.fillRect(x - sq, y - sq, sq * 2, sq * 2);
-      ctx.strokeStyle = "#999";
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(x - sq, y - sq, sq * 2, sq * 2);
-    }
-  }
 
   // Stones
   for (let r = 0; r < n; r++) {
@@ -536,17 +539,36 @@ function endGame(result, scoreData) {
   resultSection.classList.remove("hidden");
   resultText.textContent = formatResult(result);
 
-  // Detail line: dead stone counts + territory if available
-  if (scoreData && (scoreData.dead_stones || scoreData.territory)) {
-    const dead = (scoreData.dead_stones || []).length;
-    const bt   = (scoreData.territory?.black || []).length;
-    const wt   = (scoreData.territory?.white || []).length;
-    const parts = [];
-    if (dead > 0) parts.push(`死子 ${dead} 枚`);
-    if (bt > 0 || wt > 0) parts.push(`黑地 ${bt} 目，白地 ${wt} 目`);
-    resultDetail.textContent = parts.join("　");
+  if (scoreData && scoreData.board_stones) {
+    const deadList = scoreData.dead_stones || [];
+    const bStones  = scoreData.board_stones.black || [];
+    const wStones  = scoreData.board_stones.white || [];
+    const deadSet  = new Set(deadList.map(v => v.toUpperCase()));
+    const bDead    = bStones.filter(v => deadSet.has(v.toUpperCase())).length;
+    const wDead    = wStones.filter(v => deadSet.has(v.toUpperCase())).length;
+    const bAlive   = bStones.length - bDead;
+    const wAlive   = wStones.length - wDead;
+    const bTerr    = (scoreData.territory?.black || []).length;
+    const wTerr    = (scoreData.territory?.white || []).length;
+    const komi     = scoreData.game?.komi ?? 7.5;
+    const bTotal   = bAlive + bTerr;
+    const wTotal   = wAlive + wTerr + komi;
+    const komiFmt  = komi === 0 ? "—" : `+${komi}`;
+    const deadNote = deadList.length > 0
+      ? `<div class="dead-note">死子 ${deadList.length} 枚（⚫${bDead} ⚪${wDead}）</div>`
+      : "";
+    resultDetail.innerHTML = `
+      <table class="score-table">
+        <thead><tr><th></th><th>⚫ 黑棋</th><th>⚪ 白棋</th></tr></thead>
+        <tbody>
+          <tr><td>子数</td><td>${bAlive}</td><td>${wAlive}</td></tr>
+          <tr><td>领地</td><td>${bTerr}</td><td>${wTerr}</td></tr>
+          <tr class="komi-row"><td>贴目</td><td>—</td><td>${komiFmt}</td></tr>
+          <tr class="total-row"><td>合计</td><td>${bTotal}</td><td>${wTotal}</td></tr>
+        </tbody>
+      </table>${deadNote}`;
   } else {
-    resultDetail.textContent = "";
+    resultDetail.innerHTML = "";
   }
 
   draw();
@@ -677,6 +699,277 @@ window.addEventListener("resize", () => {
     draw();
   }
 });
+
+// ================================================================== //
+// Classic game replay
+// ================================================================== //
+
+const replaySection     = document.getElementById("replay-section");
+const replayPicker      = document.getElementById("replay-picker");
+const replayControls    = document.getElementById("replay-controls");
+const replayBlackEl     = document.getElementById("replay-black");
+const replayWhiteEl     = document.getElementById("replay-white");
+const replayMetaEl      = document.getElementById("replay-meta");
+const replayMoveNumEl   = document.getElementById("replay-move-num");
+const replayTotalEl     = document.getElementById("replay-total");
+const replayCommentEl   = document.getElementById("replay-comment");
+const replaySlider      = document.getElementById("replay-slider");
+const btnAutoplay       = document.getElementById("btn-autoplay");
+
+let replay = {
+  active:      false,
+  gameInfo:    null,
+  moves:       [],       // [{color, vertex, comment}]
+  positions:   [],       // positions[i] = board state after i moves
+  currentMove: 0,
+  autoPlay:    false,
+  autoTimer:   null,
+};
+
+// --- Minimal Go rules for board replay (no captures skipped) ---
+
+function _nb(r, c, n) {
+  const a = [];
+  if (r > 0)   a.push([r - 1, c]);
+  if (r < n-1) a.push([r + 1, c]);
+  if (c > 0)   a.push([r, c - 1]);
+  if (c < n-1) a.push([r, c + 1]);
+  return a;
+}
+
+function _group(board, r0, c0, n) {
+  const color = board[r0][c0];
+  const seen = new Set();
+  const group = [];
+  const stack = [[r0, c0]];
+  while (stack.length) {
+    const [r, c] = stack.pop();
+    const k = r * n + c;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (board[r][c] !== color) continue;
+    group.push([r, c]);
+    for (const [nr, nc] of _nb(r, c, n)) {
+      if (!seen.has(nr * n + nc)) stack.push([nr, nc]);
+    }
+  }
+  return group;
+}
+
+function _hasLib(board, group, n) {
+  for (const [r, c] of group)
+    for (const [nr, nc] of _nb(r, c, n))
+      if (board[nr][nc] === null) return true;
+  return false;
+}
+
+function _applyMove(board, color, vertex, n) {
+  const b = board.map(row => [...row]);
+  const cell = gtpToCell(vertex, n);
+  if (!cell) return b;          // PASS
+  const { row, col } = cell;
+  if (b[row][col]) return b;    // occupied
+  b[row][col] = color;
+  const opp = color === "black" ? "white" : "black";
+  for (const [nr, nc] of _nb(row, col, n)) {
+    if (b[nr][nc] === opp) {
+      const g = _group(b, nr, nc, n);
+      if (!_hasLib(b, g, n)) g.forEach(([gr, gc]) => { b[gr][gc] = null; });
+    }
+  }
+  return b;
+}
+
+function buildPositions(moves, boardSize) {
+  const n = boardSize;
+  const empty = Array.from({ length: n }, () => Array(n).fill(null));
+  const positions = [empty];
+  for (const { color, vertex } of moves) {
+    positions.push(_applyMove(positions[positions.length - 1], color, vertex, n));
+  }
+  return positions;
+}
+
+// --- Replay UI ---
+
+async function loadGameList() {
+  const list = document.getElementById("game-list");
+  try {
+    const data = await fetch("/api/games").then(r => r.json());
+    list.innerHTML = "";
+    if (!data.games || data.games.length === 0) {
+      list.innerHTML = '<p class="replay-loading">暂无棋局</p>';
+      return;
+    }
+    for (const g of data.games) {
+      const btn = document.createElement("button");
+      btn.className = "game-list-item";
+      btn.innerHTML = `
+        <span class="gli-title">${g.title || g.id}</span>
+        ${g.event ? `<span class="gli-event">${g.event}</span>` : ""}
+        <span class="gli-foot">
+          <span class="gli-date">${g.date || ""}</span>
+          <span class="gli-result">${g.result || ""}</span>
+        </span>
+        ${g.description ? `<span class="gli-desc">${g.description}</span>` : ""}`;
+      btn.addEventListener("click", () => loadReplayGame(g.id));
+      list.appendChild(btn);
+    }
+  } catch (e) {
+    list.innerHTML = `<p class="replay-loading">加载失败: ${e.message}</p>`;
+  }
+}
+
+async function loadReplayGame(gameId) {
+  replayCommentEl.classList.add("hidden");
+  replayCommentEl.textContent = "";
+  try {
+    const data = await fetch(`/api/games/${gameId}`).then(r => r.json());
+    if (!data.game) throw new Error(data.error || "unknown error");
+
+    const { game_info, moves } = data.game;
+    const n = game_info.board_size || 19;
+
+    replay.gameInfo    = game_info;
+    replay.moves       = moves;
+    replay.positions   = buildPositions(moves, n);
+    replay.currentMove = 0;
+    replay.active      = true;
+
+    state.boardSize  = n;
+    state.deadStones = [];
+    state.territory  = { black: [], white: [] };
+    computeLayout(n);
+
+    // Show controls, hide picker
+    replayPicker.classList.add("hidden");
+    replayControls.classList.remove("hidden");
+
+    // Players
+    const br = game_info.black_rank ? ` ${game_info.black_rank}` : "";
+    const wr = game_info.white_rank ? ` ${game_info.white_rank}` : "";
+    replayBlackEl.textContent = `⚫ ${game_info.black}${br}`;
+    replayWhiteEl.textContent = `⚪ ${game_info.white}${wr}`;
+
+    // Meta line
+    const parts = [];
+    if (game_info.event)  parts.push(game_info.event);
+    if (game_info.date)   parts.push(game_info.date);
+    if (game_info.result) parts.push(`结果: ${game_info.result}`);
+    replayMetaEl.textContent = parts.join(" · ");
+
+    replaySlider.max   = moves.length;
+    replaySlider.value = 0;
+    replayTotalEl.textContent = `共 ${moves.length} 手`;
+
+    replayGoTo(0);
+  } catch (e) {
+    showToast("加载失败：" + e.message);
+  }
+}
+
+function replayGoTo(idx) {
+  const total = replay.moves.length;
+  idx = Math.max(0, Math.min(total, idx));
+  replay.currentMove = idx;
+
+  // Update board
+  const n = replay.gameInfo.board_size || 19;
+  state.stones = replay.positions[idx].map(row => [...row]);
+  state.lastMove = idx > 0 ? gtpToCell(replay.moves[idx - 1].vertex, n) : null;
+
+  // Move number display
+  if (idx === 0) {
+    replayMoveNumEl.textContent = "开局";
+  } else {
+    const m = replay.moves[idx - 1];
+    const colorLabel = m.color === "black" ? "⚫" : "⚪";
+    replayMoveNumEl.textContent = `第 ${idx} 手 ${colorLabel} ${m.vertex}`;
+  }
+
+  // Comment
+  const comment = idx > 0 ? (replay.moves[idx - 1].comment || "") : "";
+  if (comment) {
+    replayCommentEl.textContent = comment;
+    replayCommentEl.classList.remove("hidden");
+  } else {
+    replayCommentEl.classList.add("hidden");
+  }
+
+  replaySlider.value = idx;
+  draw();
+}
+
+function stopAutoPlay() {
+  if (replay.autoTimer) { clearInterval(replay.autoTimer); replay.autoTimer = null; }
+  replay.autoPlay = false;
+  btnAutoplay.textContent = "▶ 自动播放";
+}
+
+function toggleAutoPlay() {
+  if (replay.autoPlay) { stopAutoPlay(); return; }
+  replay.autoPlay = true;
+  btnAutoplay.textContent = "⏸ 暂停";
+  replay.autoTimer = setInterval(() => {
+    if (replay.currentMove >= replay.moves.length) { stopAutoPlay(); return; }
+    replayGoTo(replay.currentMove + 1);
+  }, 700);
+}
+
+// Keyboard navigation while replaying
+document.addEventListener("keydown", (e) => {
+  if (!replay.active) return;
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+    stopAutoPlay(); replayGoTo(replay.currentMove + 1);
+  } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+    stopAutoPlay(); replayGoTo(replay.currentMove - 1);
+  } else if (e.key === "Home") {
+    stopAutoPlay(); replayGoTo(0);
+  } else if (e.key === "End") {
+    stopAutoPlay(); replayGoTo(replay.moves.length);
+  }
+});
+
+// --- Button wiring ---
+
+document.getElementById("btn-go-replay").addEventListener("click", () => {
+  setupSection.classList.add("hidden");
+  replaySection.classList.remove("hidden");
+  replayPicker.classList.remove("hidden");
+  replayControls.classList.add("hidden");
+  loadGameList();
+});
+
+document.getElementById("btn-replay-back").addEventListener("click", () => {
+  stopAutoPlay();
+  replay.active = false;
+  replaySection.classList.add("hidden");
+  setupSection.classList.remove("hidden");
+  computeLayout(19);
+  initStones(19);
+  state.deadStones = [];
+  state.territory  = { black: [], white: [] };
+  state.lastMove   = null;
+  draw();
+});
+
+document.getElementById("btn-pick-another").addEventListener("click", () => {
+  stopAutoPlay();
+  replayPicker.classList.remove("hidden");
+  replayControls.classList.add("hidden");
+  replay.active = false;
+  computeLayout(19);
+  initStones(19);
+  state.lastMove = null;
+  draw();
+});
+
+document.getElementById("btn-r-first").addEventListener("click", () => { stopAutoPlay(); replayGoTo(0); });
+document.getElementById("btn-r-prev").addEventListener("click",  () => { stopAutoPlay(); replayGoTo(replay.currentMove - 1); });
+document.getElementById("btn-r-next").addEventListener("click",  () => { stopAutoPlay(); replayGoTo(replay.currentMove + 1); });
+document.getElementById("btn-r-last").addEventListener("click",  () => { stopAutoPlay(); replayGoTo(replay.moves.length); });
+btnAutoplay.addEventListener("click", toggleAutoPlay);
+replaySlider.addEventListener("input", (e) => { stopAutoPlay(); replayGoTo(parseInt(e.target.value)); });
 
 // ================================================================== //
 // Init
