@@ -1,12 +1,20 @@
 #!/usr/bin/env sh
 # start.sh — Start the web Go server.
+# Usage: sh start.sh          (foreground)
+#        sh start.sh -d       (background / daemon, writes PID to /tmp/jinchao.pid)
 
 set -eu
+
+DAEMON=0
+for arg in "$@"; do
+  [ "$arg" = "-d" ] && DAEMON=1
+done
+PIDFILE="${PIDFILE:-/tmp/jinchao.pid}"
 
 # Load .env if present
 if [ -f .env ]; then
   set -a
-  . .env
+  . ./.env
   set +a
 fi
 
@@ -41,4 +49,10 @@ if [ -f ./venv/bin/python3 ]; then
   PYTHON=./venv/bin/python3
 fi
 
-exec "$PYTHON" app.py
+if [ "$DAEMON" = "1" ]; then
+  "$PYTHON" app.py > /tmp/jinchao.log 2>&1 &
+  echo $! > "$PIDFILE"
+  echo "Server started in background (pid $(cat $PIDFILE), log: /tmp/jinchao.log)"
+else
+  exec "$PYTHON" app.py
+fi
