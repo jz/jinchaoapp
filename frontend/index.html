@@ -8,6 +8,46 @@
 </head>
 <body>
 
+<!-- User bar -->
+<div id="user-bar">
+  <div id="user-logged-out">
+    <button id="btn-show-login" class="btn btn-small">登录</button>
+    <button id="btn-show-register" class="btn btn-small btn-primary">注册</button>
+  </div>
+  <div id="user-logged-in" class="hidden">
+    <span id="user-display-name"></span>
+    <span id="user-stats"></span>
+    <button id="btn-logout" class="btn btn-small btn-outline">退出</button>
+  </div>
+</div>
+
+<!-- Auth modal -->
+<div id="auth-modal" class="modal hidden">
+  <div class="modal-content">
+    <button id="auth-close" class="modal-close">&times;</button>
+    <h2 id="auth-title">登录</h2>
+    <form id="auth-form" autocomplete="off">
+      <label>用户名
+        <input id="auth-username" type="text" maxlength="20" required />
+      </label>
+      <label>密码
+        <input id="auth-password" type="password" minlength="4" required />
+      </label>
+      <div id="auth-display-row" class="hidden">
+        <label>显示名称（可选）
+          <input id="auth-display-name" type="text" maxlength="20" />
+        </label>
+      </div>
+      <p id="auth-error" class="auth-error hidden"></p>
+      <button type="submit" class="btn btn-primary" id="auth-submit">登录</button>
+    </form>
+    <p class="auth-switch">
+      <span id="auth-switch-text">没有账号？</span>
+      <button id="auth-switch-btn" class="link-btn">注册</button>
+    </p>
+  </div>
+</div>
+
 <div id="app">
   <!-- Left: board -->
   <div id="board-panel">

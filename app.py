@@ -7,16 +7,22 @@ import os
 import re
 import json
 import logging
+import secrets
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session
 from dotenv import load_dotenv
 from katago_gtp import KataGoGTP, KataGoError
+import database as db
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder="frontend")
+app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+# Initialize user database
+db.init_db()
 
 # Difficulty presets: (humanSLProfile, maxVisits)
 # Visits are kept low because the b18c384 model is large and CPU inference
@@ -59,6 +65,64 @@ def index():
 @app.route("/<path:filename>")
 def static_files(filename):
     return send_from_directory("frontend", filename)
+
+
+# ------------------------------------------------------------------ #
+# Auth API
+# ------------------------------------------------------------------ #
+
+@app.route("/api/register", methods=["POST"])
+def api_register():
+    data = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    display_name = data.get("display_name", "").strip()
+
+    if not username or len(username) < 2 or len(username) > 20:
+        return jsonify({"error": "用户名需要2-20个字符"}), 400
+    if not re.match(r"^[\w\u4e00-\u9fff]+$", username):
+        return jsonify({"error": "用户名只能包含字母、数字、下划线或中文"}), 400
+    if not password or len(password) < 4:
+        return jsonify({"error": "密码至少需要4个字符"}), 400
+
+    user = db.create_user(username, password, display_name)
+    if not user:
+        return jsonify({"error": "用户名已被注册"}), 409
+
+    session["user_id"] = user["id"]
+    return jsonify({"status": "ok", "user": user})
+
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    data = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+
+    if not username or not password:
+        return jsonify({"error": "请输入用户名和密码"}), 400
+
+    user = db.authenticate(username, password)
+    if not user:
+        return jsonify({"error": "用户名或密码错误"}), 401
+
+    session["user_id"] = user["id"]
+    return jsonify({"status": "ok", "user": user})
+
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    session.pop("user_id", None)
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/me", methods=["GET"])
+def api_me():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"user": None})
+    user = db.get_user_by_id(user_id)
+    return jsonify({"user": user})
 
 
 # ------------------------------------------------------------------ #

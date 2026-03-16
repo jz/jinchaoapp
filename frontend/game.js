@@ -972,6 +972,142 @@ btnAutoplay.addEventListener("click", toggleAutoPlay);
 replaySlider.addEventListener("input", (e) => { stopAutoPlay(); replayGoTo(parseInt(e.target.value)); });
 
 // ================================================================== //
+// User auth
+// ================================================================== //
+
+const authModal      = document.getElementById("auth-modal");
+const authForm       = document.getElementById("auth-form");
+const authTitle      = document.getElementById("auth-title");
+const authUsername    = document.getElementById("auth-username");
+const authPassword   = document.getElementById("auth-password");
+const authDisplayRow = document.getElementById("auth-display-row");
+const authDisplayName = document.getElementById("auth-display-name");
+const authError      = document.getElementById("auth-error");
+const authSubmit     = document.getElementById("auth-submit");
+const authSwitchText = document.getElementById("auth-switch-text");
+const authSwitchBtn  = document.getElementById("auth-switch-btn");
+const userLoggedOut  = document.getElementById("user-logged-out");
+const userLoggedIn   = document.getElementById("user-logged-in");
+const userDisplayEl  = document.getElementById("user-display-name");
+const userStatsEl    = document.getElementById("user-stats");
+
+let authMode = "login"; // "login" | "register"
+let currentUser = null;
+
+function setAuthMode(mode) {
+  authMode = mode;
+  authError.classList.add("hidden");
+  authUsername.value = "";
+  authPassword.value = "";
+  authDisplayName.value = "";
+  if (mode === "register") {
+    authTitle.textContent = "注册";
+    authSubmit.textContent = "注册";
+    authDisplayRow.classList.remove("hidden");
+    authSwitchText.textContent = "已有账号？";
+    authSwitchBtn.textContent = "登录";
+  } else {
+    authTitle.textContent = "登录";
+    authSubmit.textContent = "登录";
+    authDisplayRow.classList.add("hidden");
+    authSwitchText.textContent = "没有账号？";
+    authSwitchBtn.textContent = "注册";
+  }
+}
+
+function showAuthModal(mode) {
+  setAuthMode(mode);
+  authModal.classList.remove("hidden");
+  authUsername.focus();
+}
+
+function hideAuthModal() {
+  authModal.classList.add("hidden");
+}
+
+function updateUserUI() {
+  if (currentUser) {
+    userLoggedOut.classList.add("hidden");
+    userLoggedIn.classList.remove("hidden");
+    userDisplayEl.textContent = currentUser.display_name || currentUser.username;
+    const w = currentUser.games_won || 0;
+    const p = currentUser.games_played || 0;
+    userStatsEl.textContent = p > 0 ? `${w}胜 / ${p}局` : "";
+  } else {
+    userLoggedOut.classList.remove("hidden");
+    userLoggedIn.classList.add("hidden");
+  }
+}
+
+async function checkSession() {
+  try {
+    const data = await fetch("/api/me").then(r => r.json());
+    currentUser = data.user || null;
+  } catch {
+    currentUser = null;
+  }
+  updateUserUI();
+}
+
+document.getElementById("btn-show-login").addEventListener("click", () => showAuthModal("login"));
+document.getElementById("btn-show-register").addEventListener("click", () => showAuthModal("register"));
+document.getElementById("auth-close").addEventListener("click", hideAuthModal);
+authSwitchBtn.addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
+
+authModal.addEventListener("click", (e) => {
+  if (e.target === authModal) hideAuthModal();
+});
+
+authForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  authError.classList.add("hidden");
+  const username = authUsername.value.trim();
+  const password = authPassword.value;
+
+  if (!username || !password) {
+    authError.textContent = "请填写所有必填项";
+    authError.classList.remove("hidden");
+    return;
+  }
+
+  const endpoint = authMode === "register" ? "/api/register" : "/api/login";
+  const body = { username, password };
+  if (authMode === "register") {
+    body.display_name = authDisplayName.value.trim();
+  }
+
+  try {
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      authError.textContent = data.error || "操作失败";
+      authError.classList.remove("hidden");
+      return;
+    }
+    currentUser = data.user;
+    updateUserUI();
+    hideAuthModal();
+    showToast(authMode === "register" ? "注册成功！" : "登录成功！");
+  } catch (err) {
+    authError.textContent = "网络错误";
+    authError.classList.remove("hidden");
+  }
+});
+
+document.getElementById("btn-logout").addEventListener("click", async () => {
+  try {
+    await fetch("/api/logout", { method: "POST" });
+  } catch {}
+  currentUser = null;
+  updateUserUI();
+  showToast("已退出登录");
+});
+
+// ================================================================== //
 // Init
 // ================================================================== //
 
@@ -979,4 +1115,5 @@ replaySlider.addEventListener("input", (e) => { stopAutoPlay(); replayGoTo(parse
   computeLayout(19);
   initStones(19);
   draw();
+  checkSession();
 })();
