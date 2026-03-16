@@ -8,6 +8,8 @@ import re
 import json
 import logging
 import secrets
+import urllib.request
+import urllib.error
 from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory, session
 from dotenv import load_dotenv
@@ -20,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder="frontend")
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 
 # Initialize user database
 db.init_db()
@@ -123,6 +127,49 @@ def api_me():
         return jsonify({"user": None})
     user = db.get_user_by_id(user_id)
     return jsonify({"user": user})
+
+
+@app.route("/api/auth/config", methods=["GET"])
+def api_auth_config():
+    """Return public auth configuration (e.g. Google Client ID) to the frontend."""
+    return jsonify({"google_client_id": GOOGLE_CLIENT_ID})
+
+
+@app.route("/api/auth/google", methods=["POST"])
+def api_auth_google():
+    """Verify a Google ID token and log in (or register) the user."""
+    if not GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Google 登录未配置"}), 501
+
+    data = request.get_json(silent=True) or {}
+    credential = data.get("credential", "")
+    if not credential:
+        return jsonify({"error": "缺少 credential"}), 400
+
+    # Verify the ID token via Google's tokeninfo endpoint
+    try:
+        url = f"https://oauth2.googleapis.com/tokeninfo?id_token={credential}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            token_info = json.loads(resp.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as e:
+        logger.warning("Google token verification failed: %s", e)
+        return jsonify({"error": "Google 登录验证失败"}), 401
+
+    # Validate audience matches our client ID
+    if token_info.get("aud") != GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Token 无效"}), 401
+
+    google_id = token_info.get("sub")
+    email = token_info.get("email", "")
+    name = token_info.get("name", "")
+
+    if not google_id:
+        return jsonify({"error": "Token 无效"}), 401
+
+    user = db.find_or_create_google_user(google_id, email, name)
+    session["user_id"] = user["id"]
+    return jsonify({"status": "ok", "user": user})
 
 
 # ------------------------------------------------------------------ #

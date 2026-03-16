@@ -1049,6 +1049,60 @@ async function checkSession() {
   updateUserUI();
 }
 
+// --- Google Sign-In ---
+let googleClientId = null;
+const googleDivider  = document.getElementById("google-divider");
+const googleBtnWrap  = document.getElementById("google-signin-btn");
+
+async function initGoogleSignIn() {
+  try {
+    const data = await fetch("/api/auth/config").then(r => r.json());
+    googleClientId = data.google_client_id || null;
+  } catch {
+    googleClientId = null;
+  }
+  if (!googleClientId || typeof google === "undefined") return;
+
+  google.accounts.id.initialize({
+    client_id: googleClientId,
+    callback: handleGoogleCredential,
+  });
+
+  googleDivider.classList.remove("hidden");
+  googleBtnWrap.classList.remove("hidden");
+  google.accounts.id.renderButton(googleBtnWrap, {
+    theme: "filled_black",
+    size: "large",
+    width: 244,
+    text: "signin_with",
+    locale: "zh_CN",
+  });
+}
+
+async function handleGoogleCredential(response) {
+  authError.classList.add("hidden");
+  try {
+    const resp = await fetch("/api/auth/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: response.credential }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      authError.textContent = data.error || "Google 登录失败";
+      authError.classList.remove("hidden");
+      return;
+    }
+    currentUser = data.user;
+    updateUserUI();
+    hideAuthModal();
+    showToast("Google 登录成功！");
+  } catch {
+    authError.textContent = "网络错误";
+    authError.classList.remove("hidden");
+  }
+}
+
 document.getElementById("btn-show-login").addEventListener("click", () => showAuthModal("login"));
 document.getElementById("btn-show-register").addEventListener("click", () => showAuthModal("register"));
 document.getElementById("auth-close").addEventListener("click", hideAuthModal);
@@ -1116,4 +1170,5 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
   initStones(19);
   draw();
   checkSession();
+  initGoogleSignIn();
 })();

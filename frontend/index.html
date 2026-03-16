@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>网页围棋 · KataGo</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -41,6 +42,10 @@
       <p id="auth-error" class="auth-error hidden"></p>
       <button type="submit" class="btn btn-primary" id="auth-submit">登录</button>
     </form>
+    <div id="google-divider" class="auth-divider hidden">
+      <span>或</span>
+    </div>
+    <div id="google-signin-btn" class="hidden"></div>
     <p class="auth-switch">
       <span id="auth-switch-text">没有账号？</span>
       <button id="auth-switch-btn" class="link-btn">注册</button>

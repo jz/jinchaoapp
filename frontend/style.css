@@ -430,5 +430,27 @@ body { padding-top: 40px; }
 }
 .link-btn:hover { color: #8fc98f; }
 
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+  color: #666;
+  font-size: 12px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #444;
+}
+
+#google-signin-btn {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
 /* === Utility === */
 .hidden { display: none !important; }
