@@ -8,6 +8,9 @@ venv/
 # Environment
 .env
 
+# Runtime data (SQLite database)
+data/
+
 # KataGo binary and models (large files — download via setup.sh)
 katago_bin/
 models/
