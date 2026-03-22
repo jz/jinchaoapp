@@ -238,3 +238,72 @@ def test_google_auth_reuse_existing_user(client, monkeypatch):
         user_id_2 = resp2.get_json()["user"]["id"]
 
         assert user_id_1 == user_id_2
+
+
+# ── Stats tracking ─────────────────────────────────────────────────────────
+
+def _register_and_login(client, username="player1", password="pass1234"):
+    client.post("/api/register", json={"username": username, "password": password})
+
+
+def _set_ai_game_state(mode="vs_ai", human_color="black", game_over=False, running=True):
+    import app as app_module
+    app_module.game_state.update({
+        "running": running,
+        "game_over": game_over,
+        "mode": mode,
+        "human_color": human_color,
+        "board_size": 9,
+        "ai_color": "white" if human_color == "black" else "black",
+        "result": None,
+        "move_history": [],
+        "consecutive_passes": 0,
+    })
+
+
+def test_stats_updated_on_resign_loss(client):
+    _register_and_login(client)
+    _set_ai_game_state(human_color="black")
+    # Human (black) resigns → AI (white) wins → human loses
+    resp = client.post("/api/resign")
+    assert resp.status_code == 200
+    me = client.get("/api/me").get_json()["user"]
+    assert me["games_played"] == 1
+    assert me["games_won"] == 0
+
+
+def test_stats_win_from_resign_result_string(client):
+    """_record_game_result with 'B+Resign' and human playing black → win."""
+    import database as db_module
+    _register_and_login(client)
+    me = client.get("/api/me").get_json()["user"]
+    db_module.update_stats(me["id"], won=True)
+    me2 = client.get("/api/me").get_json()["user"]
+    assert me2["games_played"] == 1
+    assert me2["games_won"] == 1
+
+
+def test_stats_not_updated_in_local_mode(client):
+    _register_and_login(client)
+    _set_ai_game_state(mode="vs_human", human_color="black")
+    client.post("/api/resign")
+    me = client.get("/api/me").get_json()["user"]
+    assert me["games_played"] == 0
+
+
+def test_stats_not_updated_when_not_logged_in(client):
+    import app as app_module
+    _set_ai_game_state(human_color="black")
+    resp = client.post("/api/resign")
+    assert resp.status_code == 200  # should still succeed, just no stats
+
+
+def test_stats_loss_from_score(client):
+    """White wins by score → black human loses."""
+    import database as db_module
+    _register_and_login(client)
+    me = client.get("/api/me").get_json()["user"]
+    db_module.update_stats(me["id"], won=False)
+    me2 = client.get("/api/me").get_json()["user"]
+    assert me2["games_played"] == 1
+    assert me2["games_won"] == 0

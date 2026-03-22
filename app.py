@@ -352,6 +352,7 @@ def api_score():
     game_state["game_over"] = True
     game_state["running"]   = False
     game_state["result"]    = score
+    _record_game_result(score)
 
     return jsonify({
         "status":       "ok",
@@ -476,12 +477,67 @@ def api_resign():
     game_state["game_over"] = True
     game_state["running"] = False
     game_state["result"] = f"{winner}+Resign"
+    _record_game_result(game_state["result"])
     return jsonify({"status": "ok", "result": game_state["result"], "game": game_state})
 
 
 # ------------------------------------------------------------------ #
 # Internal helpers
 # ------------------------------------------------------------------ #
+
+def _gtp_to_sgf_coord(vertex: str, n: int) -> str:
+    """Convert a GTP vertex (e.g. 'Q16') to a two-char SGF coordinate (e.g. 'pd').
+    Returns '' for PASS."""
+    v = vertex.strip().upper()
+    if v in ("PASS", ""):
+        return ""
+    col_letter = v[0]
+    if col_letter not in _GTP_COLS:
+        return ""
+    col = _GTP_COLS.index(col_letter)          # 0 = left
+    row = n - int(v[1:])                        # 0 = top
+    if col < 0 or col >= n or row < 0 or row >= n:
+        return ""
+    return chr(ord("a") + col) + chr(ord("a") + row)
+
+
+def _build_sgf(gs: dict, username: str) -> str:
+    """Generate an SGF string from a completed game_state."""
+    n = gs.get("board_size", 19)
+    komi = gs.get("komi", 7.5)
+    result = gs.get("result") or "?"
+    human_color = gs.get("human_color", "black")
+    black_name = username if human_color == "black" else "KataGo"
+    white_name = username if human_color == "white" else "KataGo"
+    moves = []
+    for m in gs.get("move_history", []):
+        color = "B" if m["color"] == "black" else "W"
+        coord = _gtp_to_sgf_coord(m["vertex"], n)
+        moves.append(f";{color}[{coord}]")
+    moves_str = "".join(moves)
+    return (
+        f"(;FF[4]GM[1]SZ[{n}]"
+        f"PB[{black_name}]PW[{white_name}]"
+        f"KM[{komi}]RE[{result}]"
+        f"{moves_str})"
+    )
+
+
+def _record_game_result(result: str) -> None:
+    """Update stats and save the game for the logged-in user."""
+    user_id = session.get("user_id")
+    if not user_id or game_state.get("mode") != "vs_ai":
+        return
+    human_color = game_state.get("human_color", "black")  # "black" or "white"
+    winner_color = result[0].upper() if result else ""     # "B" or "W"
+    human_wins = (human_color == "black" and winner_color == "B") or \
+                 (human_color == "white" and winner_color == "W")
+    db.update_stats(user_id, won=human_wins)
+    user = db.get_user_by_id(user_id)
+    username = user["username"] if user else "player"
+    sgf = _build_sgf(game_state, username)
+    db.save_game(user_id, game_state.get("board_size", 19), human_color, result, sgf)
+
 
 def api_play_vertex(vertex):
     """Shared logic for play/pass routes."""
@@ -510,6 +566,7 @@ def _ai_move():
         game_state["game_over"] = True
         game_state["running"] = False
         game_state["result"] = f"{winner}+Resign"
+        _record_game_result(game_state["result"])
         return result
 
     game_state["move_history"].append({"color": ai_color, "vertex": vertex})
@@ -774,6 +831,38 @@ def api_get_game(game_id):
         return jsonify({"status": "ok", "game": data})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ------------------------------------------------------------------ #
+# User game history
+# ------------------------------------------------------------------ #
+
+@app.route("/api/my_games", methods=["GET"])
+def api_my_games():
+    """List the logged-in user's saved games (newest first)."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "not logged in"}), 401
+    games = db.list_user_games(user_id)
+    return jsonify({"status": "ok", "games": games})
+
+
+@app.route("/api/my_games/<int:game_id>", methods=["GET"])
+def api_get_my_game(game_id: int):
+    """Return the SGF and parsed moves for one of the user's saved games."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "not logged in"}), 401
+    record = db.get_user_game(game_id, user_id)
+    if not record:
+        return jsonify({"error": "game not found"}), 404
+    try:
+        parsed = _parse_sgf(record["sgf_text"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    parsed["id"] = game_id
+    parsed["played_at"] = record["played_at"]
+    return jsonify({"status": "ok", "game": parsed})
 
 
 # ------------------------------------------------------------------ #

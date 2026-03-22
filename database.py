@@ -42,6 +42,17 @@ def init_db() -> None:
         conn.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_games (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id),
+            board_size  INTEGER NOT NULL DEFAULT 19,
+            human_color TEXT    NOT NULL DEFAULT 'black',
+            result      TEXT    NOT NULL DEFAULT '',
+            played_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+            sgf_text    TEXT    NOT NULL DEFAULT ''
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -140,6 +151,41 @@ def find_or_create_google_user(google_id: str, email: str, name: str) -> dict:
     ).fetchone()
     conn.close()
     return dict(row)
+
+
+def save_game(user_id: int, board_size: int, human_color: str, result: str, sgf_text: str) -> int:
+    """Save a completed game. Returns the new game id."""
+    conn = _get_db()
+    cur = conn.execute(
+        "INSERT INTO user_games (user_id, board_size, human_color, result, sgf_text) VALUES (?, ?, ?, ?, ?)",
+        (user_id, board_size, human_color, result, sgf_text),
+    )
+    game_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return game_id
+
+
+def list_user_games(user_id: int) -> list[dict]:
+    """Return summary rows for a user's saved games, newest first."""
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT id, board_size, human_color, result, played_at FROM user_games WHERE user_id = ? ORDER BY id DESC",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_user_game(game_id: int, user_id: int) -> dict | None:
+    """Fetch one game, verifying ownership. Returns dict with sgf_text or None."""
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT id, board_size, human_color, result, played_at, sgf_text FROM user_games WHERE id = ? AND user_id = ?",
+        (game_id, user_id),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def update_stats(user_id: int, won: bool) -> None:
