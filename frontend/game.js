@@ -701,10 +701,11 @@ window.addEventListener("resize", () => {
 });
 
 // ================================================================== //
-// Classic game replay
+// Classic game replay + My Games history
 // ================================================================== //
 
 const replaySection     = document.getElementById("replay-section");
+const myGamesSection    = document.getElementById("my-games-section");
 const replayPicker      = document.getElementById("replay-picker");
 const replayControls    = document.getElementById("replay-controls");
 const replayBlackEl     = document.getElementById("replay-black");
@@ -718,6 +719,7 @@ const btnAutoplay       = document.getElementById("btn-autoplay");
 
 let replay = {
   active:      false,
+  source:      "classic",  // "classic" | "my-games"
   gameInfo:    null,
   moves:       [],       // [{color, vertex, comment}]
   positions:   [],       // positions[i] = board state after i moves
@@ -820,49 +822,67 @@ async function loadGameList() {
   }
 }
 
+function _setupReplay(data, source) {
+  if (!data.game) throw new Error(data.error || "unknown error");
+  const { game_info, moves } = data.game;
+  const n = game_info.board_size || 19;
+
+  replay.gameInfo    = game_info;
+  replay.moves       = moves;
+  replay.positions   = buildPositions(moves, n);
+  replay.currentMove = 0;
+  replay.active      = true;
+  replay.source      = source;  // "classic" | "my-games"
+
+  state.boardSize  = n;
+  state.deadStones = [];
+  state.territory  = { black: [], white: [] };
+  computeLayout(n);
+
+  // Show replay-section with controls
+  myGamesSection.classList.add("hidden");
+  replaySection.classList.remove("hidden");
+  replayPicker.classList.add("hidden");
+  replayControls.classList.remove("hidden");
+
+  // Players
+  const br = game_info.black_rank ? ` ${game_info.black_rank}` : "";
+  const wr = game_info.white_rank ? ` ${game_info.white_rank}` : "";
+  replayBlackEl.textContent = `⚫ ${game_info.black}${br}`;
+  replayWhiteEl.textContent = `⚪ ${game_info.white}${wr}`;
+
+  // Meta line
+  const parts = [];
+  if (game_info.event)    parts.push(game_info.event);
+  if (game_info.date)     parts.push(game_info.date);
+  if (data.game.played_at) parts.push(data.game.played_at.slice(0, 10));
+  if (game_info.result)   parts.push(`结果: ${game_info.result}`);
+  replayMetaEl.textContent = parts.join(" · ");
+
+  replaySlider.max   = moves.length;
+  replaySlider.value = 0;
+  replayTotalEl.textContent = `共 ${moves.length} 手`;
+
+  replayGoTo(0);
+}
+
 async function loadReplayGame(gameId) {
   replayCommentEl.classList.add("hidden");
   replayCommentEl.textContent = "";
   try {
     const data = await fetch(`/api/games/${gameId}`).then(r => r.json());
-    if (!data.game) throw new Error(data.error || "unknown error");
+    _setupReplay(data, "classic");
+  } catch (e) {
+    showToast("加载失败：" + e.message);
+  }
+}
 
-    const { game_info, moves } = data.game;
-    const n = game_info.board_size || 19;
-
-    replay.gameInfo    = game_info;
-    replay.moves       = moves;
-    replay.positions   = buildPositions(moves, n);
-    replay.currentMove = 0;
-    replay.active      = true;
-
-    state.boardSize  = n;
-    state.deadStones = [];
-    state.territory  = { black: [], white: [] };
-    computeLayout(n);
-
-    // Show controls, hide picker
-    replayPicker.classList.add("hidden");
-    replayControls.classList.remove("hidden");
-
-    // Players
-    const br = game_info.black_rank ? ` ${game_info.black_rank}` : "";
-    const wr = game_info.white_rank ? ` ${game_info.white_rank}` : "";
-    replayBlackEl.textContent = `⚫ ${game_info.black}${br}`;
-    replayWhiteEl.textContent = `⚪ ${game_info.white}${wr}`;
-
-    // Meta line
-    const parts = [];
-    if (game_info.event)  parts.push(game_info.event);
-    if (game_info.date)   parts.push(game_info.date);
-    if (game_info.result) parts.push(`结果: ${game_info.result}`);
-    replayMetaEl.textContent = parts.join(" · ");
-
-    replaySlider.max   = moves.length;
-    replaySlider.value = 0;
-    replayTotalEl.textContent = `共 ${moves.length} 手`;
-
-    replayGoTo(0);
+async function loadMyReplayGame(gameId) {
+  replayCommentEl.classList.add("hidden");
+  replayCommentEl.textContent = "";
+  try {
+    const data = await fetch(`/api/my_games/${gameId}`).then(r => r.json());
+    _setupReplay(data, "my-games");
   } catch (e) {
     showToast("加载失败：" + e.message);
   }
@@ -940,11 +960,59 @@ document.getElementById("btn-go-replay").addEventListener("click", () => {
   loadGameList();
 });
 
+async function loadMyGameList() {
+  const list = document.getElementById("my-game-list");
+  list.innerHTML = '<p class="replay-loading">加载中…</p>';
+  try {
+    const data = await fetch("/api/my_games").then(r => r.json());
+    if (data.error) { list.innerHTML = `<p class="replay-loading">${data.error}</p>`; return; }
+    list.innerHTML = "";
+    if (!data.games || data.games.length === 0) {
+      list.innerHTML = '<p class="replay-loading">暂无记录，完成一局人机对弈后将自动保存。</p>';
+      return;
+    }
+    for (const g of data.games) {
+      const colorLabel = g.human_color === "black" ? "执黑" : "执白";
+      const sizeLabel  = `${g.board_size}×${g.board_size}`;
+      const resultWin  = g.result && ((g.human_color === "black" && g.result.startsWith("B")) ||
+                                       (g.human_color === "white" && g.result.startsWith("W")));
+      const dateStr    = g.played_at ? g.played_at.slice(0, 10) : "";
+      const btn = document.createElement("button");
+      btn.className = "game-list-item";
+      btn.innerHTML = `
+        <span class="gli-title">${colorLabel} vs KataGo · ${sizeLabel}</span>
+        <span class="gli-foot">
+          <span class="gli-date">${dateStr}</span>
+          <span class="gli-result ${resultWin ? "gli-win" : "gli-loss"}">${g.result || ""}</span>
+        </span>`;
+      btn.addEventListener("click", () => loadMyReplayGame(g.id));
+      list.appendChild(btn);
+    }
+  } catch (e) {
+    list.innerHTML = `<p class="replay-loading">加载失败: ${e.message}</p>`;
+  }
+}
+
+document.getElementById("btn-go-my-games").addEventListener("click", () => {
+  setupSection.classList.add("hidden");
+  myGamesSection.classList.remove("hidden");
+  loadMyGameList();
+});
+
+document.getElementById("btn-my-games-back").addEventListener("click", () => {
+  myGamesSection.classList.add("hidden");
+  setupSection.classList.remove("hidden");
+});
+
 document.getElementById("btn-replay-back").addEventListener("click", () => {
   stopAutoPlay();
   replay.active = false;
   replaySection.classList.add("hidden");
-  setupSection.classList.remove("hidden");
+  if (replay.source === "my-games") {
+    myGamesSection.classList.remove("hidden");
+  } else {
+    setupSection.classList.remove("hidden");
+  }
   computeLayout(19);
   initStones(19);
   state.deadStones = [];
@@ -955,13 +1023,18 @@ document.getElementById("btn-replay-back").addEventListener("click", () => {
 
 document.getElementById("btn-pick-another").addEventListener("click", () => {
   stopAutoPlay();
-  replayPicker.classList.remove("hidden");
-  replayControls.classList.add("hidden");
   replay.active = false;
+  replayControls.classList.add("hidden");
   computeLayout(19);
   initStones(19);
   state.lastMove = null;
   draw();
+  if (replay.source === "my-games") {
+    replaySection.classList.add("hidden");
+    myGamesSection.classList.remove("hidden");
+  } else {
+    replayPicker.classList.remove("hidden");
+  }
 });
 
 document.getElementById("btn-r-first").addEventListener("click", () => { stopAutoPlay(); replayGoTo(0); });
@@ -1026,6 +1099,7 @@ function hideAuthModal() {
 }
 
 function updateUserUI() {
+  const btnMyGames = document.getElementById("btn-go-my-games");
   if (currentUser) {
     userLoggedOut.classList.add("hidden");
     userLoggedIn.classList.remove("hidden");
@@ -1033,9 +1107,11 @@ function updateUserUI() {
     const w = currentUser.games_won || 0;
     const p = currentUser.games_played || 0;
     userStatsEl.textContent = p > 0 ? `${w}胜 / ${p}局` : "";
+    btnMyGames.classList.remove("hidden");
   } else {
     userLoggedOut.classList.remove("hidden");
     userLoggedIn.classList.add("hidden");
+    btnMyGames.classList.add("hidden");
   }
 }
 
