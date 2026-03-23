@@ -7,16 +7,26 @@ import os
 import re
 import json
 import logging
+import secrets
+import urllib.request
+import urllib.error
 from pathlib import Path
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory, session
 from dotenv import load_dotenv
 from katago_gtp import KataGoGTP, KataGoError
+import database as db
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder="frontend")
+app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+
+# Initialize user database
+db.init_db()
 
 # Difficulty presets: (humanSLProfile, maxVisits)
 # Visits are kept low because the b18c384 model is large and CPU inference
@@ -59,6 +69,107 @@ def index():
 @app.route("/<path:filename>")
 def static_files(filename):
     return send_from_directory("frontend", filename)
+
+
+# ------------------------------------------------------------------ #
+# Auth API
+# ------------------------------------------------------------------ #
+
+@app.route("/api/register", methods=["POST"])
+def api_register():
+    data = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+    display_name = data.get("display_name", "").strip()
+
+    if not username or len(username) < 2 or len(username) > 20:
+        return jsonify({"error": "用户名需要2-20个字符"}), 400
+    if not re.match(r"^[\w\u4e00-\u9fff]+$", username):
+        return jsonify({"error": "用户名只能包含字母、数字、下划线或中文"}), 400
+    if not password or len(password) < 4:
+        return jsonify({"error": "密码至少需要4个字符"}), 400
+
+    user = db.create_user(username, password, display_name)
+    if not user:
+        return jsonify({"error": "用户名已被注册"}), 409
+
+    session["user_id"] = user["id"]
+    return jsonify({"status": "ok", "user": user})
+
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    data = request.get_json(silent=True) or {}
+    username = data.get("username", "").strip()
+    password = data.get("password", "")
+
+    if not username or not password:
+        return jsonify({"error": "请输入用户名和密码"}), 400
+
+    user = db.authenticate(username, password)
+    if not user:
+        return jsonify({"error": "用户名或密码错误"}), 401
+
+    session["user_id"] = user["id"]
+    return jsonify({"status": "ok", "user": user})
+
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    session.pop("user_id", None)
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/me", methods=["GET"])
+def api_me():
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"user": None})
+    user = db.get_user_by_id(user_id)
+    return jsonify({"user": user})
+
+
+@app.route("/api/auth/config", methods=["GET"])
+def api_auth_config():
+    """Return public auth configuration (e.g. Google Client ID) to the frontend."""
+    return jsonify({"google_client_id": GOOGLE_CLIENT_ID})
+
+
+@app.route("/api/auth/google", methods=["POST"])
+def api_auth_google():
+    """Verify a Google ID token and log in (or register) the user."""
+    if not GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Google 登录未配置"}), 501
+
+    data = request.get_json(silent=True) or {}
+    credential = data.get("credential", "")
+    if not credential:
+        return jsonify({"error": "缺少 credential"}), 400
+
+    # Verify the ID token via Google's tokeninfo endpoint
+    try:
+        url = f"https://oauth2.googleapis.com/tokeninfo?id_token={credential}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            token_info = json.loads(resp.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as e:
+        logger.warning("Google token verification failed: %s", e)
+        return jsonify({"error": "Google 登录验证失败"}), 401
+
+    # Validate audience matches our client ID
+    if token_info.get("aud") != GOOGLE_CLIENT_ID:
+        return jsonify({"error": "Token 无效"}), 401
+
+    google_id = token_info.get("sub")
+    email = token_info.get("email", "")
+    name = token_info.get("name", "")
+
+    if not google_id:
+        return jsonify({"error": "Token 无效"}), 401
+
+    user = db.find_or_create_google_user(google_id, email, name)
+    session["user_id"] = user["id"]
+    return jsonify({"status": "ok", "user": user})
 
 
 # ------------------------------------------------------------------ #
@@ -241,6 +352,7 @@ def api_score():
     game_state["game_over"] = True
     game_state["running"]   = False
     game_state["result"]    = score
+    _record_game_result(score)
 
     return jsonify({
         "status":       "ok",
@@ -365,12 +477,67 @@ def api_resign():
     game_state["game_over"] = True
     game_state["running"] = False
     game_state["result"] = f"{winner}+Resign"
+    _record_game_result(game_state["result"])
     return jsonify({"status": "ok", "result": game_state["result"], "game": game_state})
 
 
 # ------------------------------------------------------------------ #
 # Internal helpers
 # ------------------------------------------------------------------ #
+
+def _gtp_to_sgf_coord(vertex: str, n: int) -> str:
+    """Convert a GTP vertex (e.g. 'Q16') to a two-char SGF coordinate (e.g. 'pd').
+    Returns '' for PASS."""
+    v = vertex.strip().upper()
+    if v in ("PASS", ""):
+        return ""
+    col_letter = v[0]
+    if col_letter not in _GTP_COLS:
+        return ""
+    col = _GTP_COLS.index(col_letter)          # 0 = left
+    row = n - int(v[1:])                        # 0 = top
+    if col < 0 or col >= n or row < 0 or row >= n:
+        return ""
+    return chr(ord("a") + col) + chr(ord("a") + row)
+
+
+def _build_sgf(gs: dict, username: str) -> str:
+    """Generate an SGF string from a completed game_state."""
+    n = gs.get("board_size", 19)
+    komi = gs.get("komi", 7.5)
+    result = gs.get("result") or "?"
+    human_color = gs.get("human_color", "black")
+    black_name = username if human_color == "black" else "KataGo"
+    white_name = username if human_color == "white" else "KataGo"
+    moves = []
+    for m in gs.get("move_history", []):
+        color = "B" if m["color"] == "black" else "W"
+        coord = _gtp_to_sgf_coord(m["vertex"], n)
+        moves.append(f";{color}[{coord}]")
+    moves_str = "".join(moves)
+    return (
+        f"(;FF[4]GM[1]SZ[{n}]"
+        f"PB[{black_name}]PW[{white_name}]"
+        f"KM[{komi}]RE[{result}]"
+        f"{moves_str})"
+    )
+
+
+def _record_game_result(result: str) -> None:
+    """Update stats and save the game for the logged-in user."""
+    user_id = session.get("user_id")
+    if not user_id or game_state.get("mode") != "vs_ai":
+        return
+    human_color = game_state.get("human_color", "black")  # "black" or "white"
+    winner_color = result[0].upper() if result else ""     # "B" or "W"
+    human_wins = (human_color == "black" and winner_color == "B") or \
+                 (human_color == "white" and winner_color == "W")
+    db.update_stats(user_id, won=human_wins)
+    user = db.get_user_by_id(user_id)
+    username = user["username"] if user else "player"
+    sgf = _build_sgf(game_state, username)
+    db.save_game(user_id, game_state.get("board_size", 19), human_color, result, sgf)
+
 
 def api_play_vertex(vertex):
     """Shared logic for play/pass routes."""
@@ -399,6 +566,7 @@ def _ai_move():
         game_state["game_over"] = True
         game_state["running"] = False
         game_state["result"] = f"{winner}+Resign"
+        _record_game_result(game_state["result"])
         return result
 
     game_state["move_history"].append({"color": ai_color, "vertex": vertex})
@@ -663,6 +831,38 @@ def api_get_game(game_id):
         return jsonify({"status": "ok", "game": data})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ------------------------------------------------------------------ #
+# User game history
+# ------------------------------------------------------------------ #
+
+@app.route("/api/my_games", methods=["GET"])
+def api_my_games():
+    """List the logged-in user's saved games (newest first)."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "not logged in"}), 401
+    games = db.list_user_games(user_id)
+    return jsonify({"status": "ok", "games": games})
+
+
+@app.route("/api/my_games/<int:game_id>", methods=["GET"])
+def api_get_my_game(game_id: int):
+    """Return the SGF and parsed moves for one of the user's saved games."""
+    user_id = session.get("user_id")
+    if not user_id:
+        return jsonify({"error": "not logged in"}), 401
+    record = db.get_user_game(game_id, user_id)
+    if not record:
+        return jsonify({"error": "game not found"}), 404
+    try:
+        parsed = _parse_sgf(record["sgf_text"])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    parsed["id"] = game_id
+    parsed["played_at"] = record["played_at"]
+    return jsonify({"status": "ok", "game": parsed})
 
 
 # ------------------------------------------------------------------ #

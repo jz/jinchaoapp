@@ -701,10 +701,11 @@ window.addEventListener("resize", () => {
 });
 
 // ================================================================== //
-// Classic game replay
+// Classic game replay + My Games history
 // ================================================================== //
 
 const replaySection     = document.getElementById("replay-section");
+const myGamesSection    = document.getElementById("my-games-section");
 const replayPicker      = document.getElementById("replay-picker");
 const replayControls    = document.getElementById("replay-controls");
 const replayBlackEl     = document.getElementById("replay-black");
@@ -718,6 +719,7 @@ const btnAutoplay       = document.getElementById("btn-autoplay");
 
 let replay = {
   active:      false,
+  source:      "classic",  // "classic" | "my-games"
   gameInfo:    null,
   moves:       [],       // [{color, vertex, comment}]
   positions:   [],       // positions[i] = board state after i moves
@@ -820,49 +822,67 @@ async function loadGameList() {
   }
 }
 
+function _setupReplay(data, source) {
+  if (!data.game) throw new Error(data.error || "unknown error");
+  const { game_info, moves } = data.game;
+  const n = game_info.board_size || 19;
+
+  replay.gameInfo    = game_info;
+  replay.moves       = moves;
+  replay.positions   = buildPositions(moves, n);
+  replay.currentMove = 0;
+  replay.active      = true;
+  replay.source      = source;  // "classic" | "my-games"
+
+  state.boardSize  = n;
+  state.deadStones = [];
+  state.territory  = { black: [], white: [] };
+  computeLayout(n);
+
+  // Show replay-section with controls
+  myGamesSection.classList.add("hidden");
+  replaySection.classList.remove("hidden");
+  replayPicker.classList.add("hidden");
+  replayControls.classList.remove("hidden");
+
+  // Players
+  const br = game_info.black_rank ? ` ${game_info.black_rank}` : "";
+  const wr = game_info.white_rank ? ` ${game_info.white_rank}` : "";
+  replayBlackEl.textContent = `⚫ ${game_info.black}${br}`;
+  replayWhiteEl.textContent = `⚪ ${game_info.white}${wr}`;
+
+  // Meta line
+  const parts = [];
+  if (game_info.event)    parts.push(game_info.event);
+  if (game_info.date)     parts.push(game_info.date);
+  if (data.game.played_at) parts.push(data.game.played_at.slice(0, 10));
+  if (game_info.result)   parts.push(`结果: ${game_info.result}`);
+  replayMetaEl.textContent = parts.join(" · ");
+
+  replaySlider.max   = moves.length;
+  replaySlider.value = 0;
+  replayTotalEl.textContent = `共 ${moves.length} 手`;
+
+  replayGoTo(0);
+}
+
 async function loadReplayGame(gameId) {
   replayCommentEl.classList.add("hidden");
   replayCommentEl.textContent = "";
   try {
     const data = await fetch(`/api/games/${gameId}`).then(r => r.json());
-    if (!data.game) throw new Error(data.error || "unknown error");
+    _setupReplay(data, "classic");
+  } catch (e) {
+    showToast("加载失败：" + e.message);
+  }
+}
 
-    const { game_info, moves } = data.game;
-    const n = game_info.board_size || 19;
-
-    replay.gameInfo    = game_info;
-    replay.moves       = moves;
-    replay.positions   = buildPositions(moves, n);
-    replay.currentMove = 0;
-    replay.active      = true;
-
-    state.boardSize  = n;
-    state.deadStones = [];
-    state.territory  = { black: [], white: [] };
-    computeLayout(n);
-
-    // Show controls, hide picker
-    replayPicker.classList.add("hidden");
-    replayControls.classList.remove("hidden");
-
-    // Players
-    const br = game_info.black_rank ? ` ${game_info.black_rank}` : "";
-    const wr = game_info.white_rank ? ` ${game_info.white_rank}` : "";
-    replayBlackEl.textContent = `⚫ ${game_info.black}${br}`;
-    replayWhiteEl.textContent = `⚪ ${game_info.white}${wr}`;
-
-    // Meta line
-    const parts = [];
-    if (game_info.event)  parts.push(game_info.event);
-    if (game_info.date)   parts.push(game_info.date);
-    if (game_info.result) parts.push(`结果: ${game_info.result}`);
-    replayMetaEl.textContent = parts.join(" · ");
-
-    replaySlider.max   = moves.length;
-    replaySlider.value = 0;
-    replayTotalEl.textContent = `共 ${moves.length} 手`;
-
-    replayGoTo(0);
+async function loadMyReplayGame(gameId) {
+  replayCommentEl.classList.add("hidden");
+  replayCommentEl.textContent = "";
+  try {
+    const data = await fetch(`/api/my_games/${gameId}`).then(r => r.json());
+    _setupReplay(data, "my-games");
   } catch (e) {
     showToast("加载失败：" + e.message);
   }
@@ -940,11 +960,56 @@ document.getElementById("btn-go-replay").addEventListener("click", () => {
   loadGameList();
 });
 
+async function loadMyGameList() {
+  const list = document.getElementById("my-game-list");
+  list.innerHTML = '<p class="replay-loading">加载中…</p>';
+  try {
+    const data = await fetch("/api/my_games").then(r => r.json());
+    if (data.error) { list.innerHTML = `<p class="replay-loading">${data.error}</p>`; return; }
+    list.innerHTML = "";
+    if (!data.games || data.games.length === 0) {
+      list.innerHTML = '<p class="replay-loading">暂无记录，完成一局人机对弈后将自动保存。</p>';
+      return;
+    }
+    data.games.forEach((g, idx) => {
+      const gameNum   = data.games.length - idx;
+      const resultWin = g.result && ((g.human_color === "black" && g.result.startsWith("B")) ||
+                                      (g.human_color === "white" && g.result.startsWith("W")));
+      const dateStr   = g.played_at ? g.played_at.replace("T", " ").slice(0, 16) : "";
+      const btn = document.createElement("button");
+      btn.className = "game-list-item my-game-row";
+      btn.innerHTML = `
+        <span class="mgl-num">#${gameNum}</span>
+        <span class="mgl-result ${resultWin ? "gli-win" : "gli-loss"}">${g.result || "—"}</span>
+        <span class="mgl-date">${dateStr}</span>`;
+      btn.addEventListener("click", () => loadMyReplayGame(g.id));
+      list.appendChild(btn);
+    });
+  } catch (e) {
+    list.innerHTML = `<p class="replay-loading">加载失败: ${e.message}</p>`;
+  }
+}
+
+document.getElementById("btn-go-my-games").addEventListener("click", () => {
+  setupSection.classList.add("hidden");
+  myGamesSection.classList.remove("hidden");
+  loadMyGameList();
+});
+
+document.getElementById("btn-my-games-back").addEventListener("click", () => {
+  myGamesSection.classList.add("hidden");
+  setupSection.classList.remove("hidden");
+});
+
 document.getElementById("btn-replay-back").addEventListener("click", () => {
   stopAutoPlay();
   replay.active = false;
   replaySection.classList.add("hidden");
-  setupSection.classList.remove("hidden");
+  if (replay.source === "my-games") {
+    myGamesSection.classList.remove("hidden");
+  } else {
+    setupSection.classList.remove("hidden");
+  }
   computeLayout(19);
   initStones(19);
   state.deadStones = [];
@@ -955,13 +1020,18 @@ document.getElementById("btn-replay-back").addEventListener("click", () => {
 
 document.getElementById("btn-pick-another").addEventListener("click", () => {
   stopAutoPlay();
-  replayPicker.classList.remove("hidden");
-  replayControls.classList.add("hidden");
   replay.active = false;
+  replayControls.classList.add("hidden");
   computeLayout(19);
   initStones(19);
   state.lastMove = null;
   draw();
+  if (replay.source === "my-games") {
+    replaySection.classList.add("hidden");
+    myGamesSection.classList.remove("hidden");
+  } else {
+    replayPicker.classList.remove("hidden");
+  }
 });
 
 document.getElementById("btn-r-first").addEventListener("click", () => { stopAutoPlay(); replayGoTo(0); });
@@ -972,6 +1042,199 @@ btnAutoplay.addEventListener("click", toggleAutoPlay);
 replaySlider.addEventListener("input", (e) => { stopAutoPlay(); replayGoTo(parseInt(e.target.value)); });
 
 // ================================================================== //
+// User auth
+// ================================================================== //
+
+const authModal      = document.getElementById("auth-modal");
+const authForm       = document.getElementById("auth-form");
+const authTitle      = document.getElementById("auth-title");
+const authUsername    = document.getElementById("auth-username");
+const authPassword   = document.getElementById("auth-password");
+const authDisplayRow = document.getElementById("auth-display-row");
+const authDisplayName = document.getElementById("auth-display-name");
+const authError      = document.getElementById("auth-error");
+const authSubmit     = document.getElementById("auth-submit");
+const authSwitchText = document.getElementById("auth-switch-text");
+const authSwitchBtn  = document.getElementById("auth-switch-btn");
+const userLoggedOut  = document.getElementById("user-logged-out");
+const userLoggedIn   = document.getElementById("user-logged-in");
+const userDisplayEl  = document.getElementById("user-display-name");
+const userStatsEl    = document.getElementById("user-stats");
+
+let authMode = "login"; // "login" | "register"
+let currentUser = null;
+
+function setAuthMode(mode) {
+  authMode = mode;
+  authError.classList.add("hidden");
+  authUsername.value = "";
+  authPassword.value = "";
+  authDisplayName.value = "";
+  if (mode === "register") {
+    authTitle.textContent = "注册";
+    authSubmit.textContent = "注册";
+    authDisplayRow.classList.remove("hidden");
+    authSwitchText.textContent = "已有账号？";
+    authSwitchBtn.textContent = "登录";
+  } else {
+    authTitle.textContent = "登录";
+    authSubmit.textContent = "登录";
+    authDisplayRow.classList.add("hidden");
+    authSwitchText.textContent = "没有账号？";
+    authSwitchBtn.textContent = "注册";
+  }
+}
+
+function showAuthModal(mode) {
+  setAuthMode(mode);
+  authModal.classList.remove("hidden");
+  authUsername.focus();
+}
+
+function hideAuthModal() {
+  authModal.classList.add("hidden");
+}
+
+function updateUserUI() {
+  const btnMyGames = document.getElementById("btn-go-my-games");
+  if (currentUser) {
+    userLoggedOut.classList.add("hidden");
+    userLoggedIn.classList.remove("hidden");
+    userDisplayEl.textContent = currentUser.display_name || currentUser.username;
+    const w = currentUser.games_won || 0;
+    const p = currentUser.games_played || 0;
+    userStatsEl.textContent = p > 0 ? `${w}胜 / ${p}局` : "";
+    btnMyGames.classList.remove("hidden");
+  } else {
+    userLoggedOut.classList.remove("hidden");
+    userLoggedIn.classList.add("hidden");
+    btnMyGames.classList.add("hidden");
+  }
+}
+
+async function checkSession() {
+  try {
+    const data = await fetch("/api/me").then(r => r.json());
+    currentUser = data.user || null;
+  } catch {
+    currentUser = null;
+  }
+  updateUserUI();
+}
+
+// --- Google Sign-In ---
+let googleClientId = null;
+const googleDivider  = document.getElementById("google-divider");
+const googleBtnWrap  = document.getElementById("google-signin-btn");
+
+async function initGoogleSignIn() {
+  try {
+    const data = await fetch("/api/auth/config").then(r => r.json());
+    googleClientId = data.google_client_id || null;
+  } catch {
+    googleClientId = null;
+  }
+  if (!googleClientId || typeof google === "undefined") return;
+
+  google.accounts.id.initialize({
+    client_id: googleClientId,
+    callback: handleGoogleCredential,
+  });
+
+  googleDivider.classList.remove("hidden");
+  googleBtnWrap.classList.remove("hidden");
+  google.accounts.id.renderButton(googleBtnWrap, {
+    theme: "filled_black",
+    size: "large",
+    width: 244,
+    text: "signin_with",
+    locale: "zh_CN",
+  });
+}
+
+async function handleGoogleCredential(response) {
+  authError.classList.add("hidden");
+  try {
+    const resp = await fetch("/api/auth/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: response.credential }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      authError.textContent = data.error || "Google 登录失败";
+      authError.classList.remove("hidden");
+      return;
+    }
+    currentUser = data.user;
+    updateUserUI();
+    hideAuthModal();
+    showToast("Google 登录成功！");
+  } catch {
+    authError.textContent = "网络错误";
+    authError.classList.remove("hidden");
+  }
+}
+
+document.getElementById("btn-show-login").addEventListener("click", () => showAuthModal("login"));
+document.getElementById("btn-show-register").addEventListener("click", () => showAuthModal("register"));
+document.getElementById("auth-close").addEventListener("click", hideAuthModal);
+authSwitchBtn.addEventListener("click", () => setAuthMode(authMode === "login" ? "register" : "login"));
+
+authModal.addEventListener("click", (e) => {
+  if (e.target === authModal) hideAuthModal();
+});
+
+authForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  authError.classList.add("hidden");
+  const username = authUsername.value.trim();
+  const password = authPassword.value;
+
+  if (!username || !password) {
+    authError.textContent = "请填写所有必填项";
+    authError.classList.remove("hidden");
+    return;
+  }
+
+  const endpoint = authMode === "register" ? "/api/register" : "/api/login";
+  const body = { username, password };
+  if (authMode === "register") {
+    body.display_name = authDisplayName.value.trim();
+  }
+
+  try {
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      authError.textContent = data.error || "操作失败";
+      authError.classList.remove("hidden");
+      return;
+    }
+    currentUser = data.user;
+    updateUserUI();
+    hideAuthModal();
+    showToast(authMode === "register" ? "注册成功！" : "登录成功！");
+  } catch (err) {
+    authError.textContent = "网络错误";
+    authError.classList.remove("hidden");
+  }
+});
+
+document.getElementById("btn-logout").addEventListener("click", async () => {
+  try {
+    await fetch("/api/logout", { method: "POST" });
+  } catch {}
+  currentUser = null;
+  updateUserUI();
+  showToast("已退出登录");
+});
+
+// ================================================================== //
 // Init
 // ================================================================== //
 
@@ -979,4 +1242,6 @@ replaySlider.addEventListener("input", (e) => { stopAutoPlay(); replayGoTo(parse
   computeLayout(19);
   initStones(19);
   draw();
+  checkSession();
+  initGoogleSignIn();
 })();

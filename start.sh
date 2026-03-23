@@ -43,9 +43,11 @@ echo "  Model:   $KATAGO_MODEL"
 echo "  Config:  $KATAGO_CONFIG"
 echo ""
 
-# Prefer venv python if available
+# Prefer venv python if available (.venv takes precedence over venv)
 PYTHON=python3
-if [ -f ./venv/bin/python3 ]; then
+if [ -f ./.venv/bin/python3 ]; then
+  PYTHON=./.venv/bin/python3
+elif [ -f ./venv/bin/python3 ]; then
   PYTHON=./venv/bin/python3
 fi
 
