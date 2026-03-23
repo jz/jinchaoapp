@@ -971,23 +971,20 @@ async function loadMyGameList() {
       list.innerHTML = '<p class="replay-loading">暂无记录，完成一局人机对弈后将自动保存。</p>';
       return;
     }
-    for (const g of data.games) {
-      const colorLabel = g.human_color === "black" ? "执黑" : "执白";
-      const sizeLabel  = `${g.board_size}×${g.board_size}`;
-      const resultWin  = g.result && ((g.human_color === "black" && g.result.startsWith("B")) ||
-                                       (g.human_color === "white" && g.result.startsWith("W")));
-      const dateStr    = g.played_at ? g.played_at.slice(0, 10) : "";
+    data.games.forEach((g, idx) => {
+      const gameNum   = data.games.length - idx;
+      const resultWin = g.result && ((g.human_color === "black" && g.result.startsWith("B")) ||
+                                      (g.human_color === "white" && g.result.startsWith("W")));
+      const dateStr   = g.played_at ? g.played_at.replace("T", " ").slice(0, 16) : "";
       const btn = document.createElement("button");
-      btn.className = "game-list-item";
+      btn.className = "game-list-item my-game-row";
       btn.innerHTML = `
-        <span class="gli-title">${colorLabel} vs KataGo · ${sizeLabel}</span>
-        <span class="gli-foot">
-          <span class="gli-date">${dateStr}</span>
-          <span class="gli-result ${resultWin ? "gli-win" : "gli-loss"}">${g.result || ""}</span>
-        </span>`;
+        <span class="mgl-num">#${gameNum}</span>
+        <span class="mgl-result ${resultWin ? "gli-win" : "gli-loss"}">${g.result || "—"}</span>
+        <span class="mgl-date">${dateStr}</span>`;
       btn.addEventListener("click", () => loadMyReplayGame(g.id));
       list.appendChild(btn);
-    }
+    });
   } catch (e) {
     list.innerHTML = `<p class="replay-loading">加载失败: ${e.message}</p>`;
   }

@@ -456,5 +456,15 @@ body { padding-top: 40px; }
 .gli-win  { color: #6bc96b; font-weight: 600; }
 .gli-loss { color: #e07070; font-weight: 600; }
 
+.my-game-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+}
+.mgl-num  { color: #888; font-size: 12px; min-width: 28px; }
+.mgl-result { flex: 1; font-size: 13px; }
+.mgl-date { color: #888; font-size: 11px; white-space: nowrap; }
+
 /* === Utility === */
 .hidden { display: none !important; }
