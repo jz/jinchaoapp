@@ -1244,4 +1244,12 @@ document.getElementById("btn-logout").addEventListener("click", async () => {
   draw();
   checkSession();
   initGoogleSignIn();
+
+  document.getElementById("board-size").addEventListener("change", () => {
+    const n = parseInt(document.getElementById("board-size").value, 10);
+    state.boardSize = n;
+    initStones(n);
+    computeLayout(n);
+    draw();
+  });
 })();
