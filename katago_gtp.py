@@ -2,6 +2,7 @@
 KataGo GTP (Go Text Protocol) interface.
 Manages a KataGo subprocess and communicates via stdin/stdout.
 """
+from __future__ import annotations
 
 import subprocess
 import threading
