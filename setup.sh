@@ -27,7 +27,7 @@ install_deps() {
   case "$OS" in
     FreeBSD)
       echo "==> Installing system packages (pkg)..."
-      pkg install -y python3 py311-pip curl unzip eigen cmake git gmake
+      pkg install -y python3 py311-pip curl unzip eigen cmake git gmake p7zip
       ;;
     Linux)
       if command -v apt-get >/dev/null 2>&1; then
@@ -128,72 +128,100 @@ install_model() {
 }
 
 # ── Pikafish (Chinese Chess engine) ───────────────────────────────────────
+# Releases ship everything as a single .7z archive; we need p7zip to extract.
 install_pikafish() {
   PIKAFISH_DIR="./pikafish_bin"
   mkdir -p "$PIKAFISH_DIR"
 
-  if [ -f "$PIKAFISH_DIR/pikafish" ]; then
-    echo "==> Pikafish binary already exists, skipping."
-  else
-    echo "==> Fetching latest Pikafish release info..."
-    RELEASE_JSON=$(curl -sf "https://api.github.com/repos/official-pikafish/Pikafish/releases/latest" || echo "")
-    if [ -z "$RELEASE_JSON" ]; then
-      echo "WARNING: Could not reach GitHub API — skipping Pikafish download." >&2
-      return
-    fi
+  # FreeBSD: no native binary available — skip gracefully
+  case "$OS" in
+    FreeBSD) echo "==> Pikafish: no FreeBSD binary available, skipping."; return ;;
+  esac
 
-    TAG=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-    echo "==> Latest Pikafish release: $TAG"
-
-    # Pick the right binary for the platform
-    case "$OS" in
-      Linux)
-        case "$ARCH" in
-          x86_64) ASSET="pikafish-linux-x86-64-modern" ;;
-          aarch64|arm64) ASSET="pikafish-linux-armv8" ;;
-          *) echo "WARNING: Unknown Linux arch $ARCH — skipping Pikafish." >&2; return ;;
-        esac ;;
-      Darwin)
-        case "$ARCH" in
-          arm64) ASSET="pikafish-macos-apple-silicon" ;;
-          x86_64) ASSET="pikafish-macos-x86-64-modern" ;;
-          *) echo "WARNING: Unknown macOS arch $ARCH — skipping Pikafish." >&2; return ;;
-        esac ;;
-      *) echo "WARNING: Unsupported OS $OS — skipping Pikafish." >&2; return ;;
-    esac
-
-    BIN_URL="https://github.com/official-pikafish/Pikafish/releases/download/${TAG}/${ASSET}"
-    echo "==> Downloading Pikafish binary ($ASSET)..."
-    if curl -L --retry 3 --retry-delay 2 -o "$PIKAFISH_DIR/pikafish" "$BIN_URL"; then
-      chmod +x "$PIKAFISH_DIR/pikafish"
-      echo "==> Pikafish binary saved to $PIKAFISH_DIR/pikafish"
-    else
-      echo "WARNING: Failed to download Pikafish binary." >&2
-      rm -f "$PIKAFISH_DIR/pikafish"
-      return
-    fi
-  fi
-
-  if [ -f "$PIKAFISH_DIR/pikafish.nnue" ]; then
-    echo "==> Pikafish NNUE model already exists, skipping."
+  if [ -f "$PIKAFISH_DIR/pikafish" ] && [ -f "$PIKAFISH_DIR/pikafish.nnue" ]; then
+    echo "==> Pikafish already installed, skipping."
     return
   fi
 
-  # Derive model URL from release assets (look for *.nnue)
-  NNUE_URL=$(echo "$RELEASE_JSON" | grep '"browser_download_url"' | grep '\.nnue"' | head -1 \
-             | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/' || echo "")
-  if [ -z "$NNUE_URL" ]; then
-    echo "WARNING: Could not find .nnue asset in release — Pikafish will use built-in eval." >&2
+  # Locate a 7-zip command
+  SEVENZIP=""
+  for cmd in 7z 7za 7zz; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      SEVENZIP="$cmd"; break
+    fi
+  done
+  if [ -z "$SEVENZIP" ]; then
+    echo "WARNING: p7zip not found — cannot extract Pikafish archive. Skipping." >&2
     return
   fi
 
-  echo "==> Downloading Pikafish NNUE model..."
-  if curl -L --retry 3 --retry-delay 2 -o "$PIKAFISH_DIR/pikafish.nnue" "$NNUE_URL"; then
-    echo "==> NNUE model saved to $PIKAFISH_DIR/pikafish.nnue"
-  else
-    echo "WARNING: Failed to download NNUE model — Pikafish will use built-in eval." >&2
-    rm -f "$PIKAFISH_DIR/pikafish.nnue"
+  echo "==> Fetching latest Pikafish release info..."
+  RELEASE_JSON=$(curl -sf \
+    "https://api.github.com/repos/official-pikafish/Pikafish/releases/latest" || echo "")
+  if [ -z "$RELEASE_JSON" ]; then
+    echo "WARNING: Could not reach GitHub API — skipping Pikafish." >&2
+    return
   fi
+
+  TAG=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 \
+        | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+  echo "==> Latest Pikafish release: $TAG"
+
+  # URL of the single .7z bundle
+  ARCHIVE_URL=$(echo "$RELEASE_JSON" | grep '"browser_download_url"' \
+    | grep '\.7z"' | head -1 \
+    | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')
+  if [ -z "$ARCHIVE_URL" ]; then
+    echo "WARNING: Could not find .7z asset in release — skipping Pikafish." >&2
+    return
+  fi
+
+  # Path inside the archive for the platform binary
+  case "$OS" in
+    Linux)
+      case "$ARCH" in
+        x86_64)         BIN_PATH="Linux/pikafish-avx2" ;;
+        aarch64|arm64)  BIN_PATH="Android/pikafish-armv8" ;;
+        *) echo "WARNING: Unknown arch $ARCH — skipping Pikafish." >&2; return ;;
+      esac ;;
+    Darwin)
+      case "$ARCH" in
+        arm64)   BIN_PATH="MacOS/pikafish-apple-silicon" ;;
+        x86_64)  BIN_PATH="MacOS/pikafish-macos-x86-64-modern" ;;
+        *) echo "WARNING: Unknown arch $ARCH — skipping Pikafish." >&2; return ;;
+      esac ;;
+  esac
+
+  ARCHIVE_TMP="/tmp/pikafish_release.7z"
+  EXTRACT_TMP="/tmp/pikafish_extract"
+  echo "==> Downloading Pikafish archive (~55 MB)..."
+  if ! curl -L --retry 3 --retry-delay 2 -o "$ARCHIVE_TMP" "$ARCHIVE_URL"; then
+    echo "WARNING: Download failed — skipping Pikafish." >&2
+    return
+  fi
+
+  rm -rf "$EXTRACT_TMP"
+  echo "==> Extracting $BIN_PATH and pikafish.nnue ..."
+  "$SEVENZIP" e "$ARCHIVE_TMP" "$BIN_PATH" "pikafish.nnue" \
+    -o"$EXTRACT_TMP" -y >/dev/null 2>&1
+
+  BIN_FILE=$(basename "$BIN_PATH")
+  if [ -f "$EXTRACT_TMP/$BIN_FILE" ]; then
+    cp "$EXTRACT_TMP/$BIN_FILE" "$PIKAFISH_DIR/pikafish"
+    chmod +x "$PIKAFISH_DIR/pikafish"
+    echo "==> Pikafish binary saved."
+  else
+    echo "WARNING: Binary not found in archive — skipping Pikafish." >&2
+  fi
+
+  if [ -f "$EXTRACT_TMP/pikafish.nnue" ]; then
+    cp "$EXTRACT_TMP/pikafish.nnue" "$PIKAFISH_DIR/pikafish.nnue"
+    echo "==> NNUE model saved."
+  else
+    echo "WARNING: pikafish.nnue not found in archive." >&2
+  fi
+
+  rm -rf "$ARCHIVE_TMP" "$EXTRACT_TMP"
 }
 
 # ── Python deps ────────────────────────────────────────────────────────────

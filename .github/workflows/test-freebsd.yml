@@ -1,0 +1,84 @@
+name: Test setup.sh on FreeBSD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  setup-freebsd:
+    name: FreeBSD 14 – full setup + tests
+    runs-on: macos-14          # vmactions requires a macOS host
+    timeout-minutes: 90        # KataGo build from source can take ~30 min
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run setup.sh and tests inside FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          usesh: true
+
+          # Install system packages BEFORE setup.sh runs so it finds them
+          # immediately; setup.sh's install_deps is idempotent for duplicates.
+          prepare: |
+            pkg install -y \
+              python3 py311-pip \
+              curl unzip \
+              eigen cmake git gmake \
+              p7zip
+
+          run: |
+            set -e
+
+            echo "===== Running setup.sh ====="
+            sh setup.sh
+
+            echo ""
+            echo "===== Verifying outputs ====="
+
+            # KataGo binary
+            if [ -x ./katago_bin/katago ]; then
+              echo "[OK] KataGo binary present and executable"
+            else
+              echo "[FAIL] KataGo binary missing or not executable" >&2
+              exit 1
+            fi
+
+            # KataGo model
+            if [ -f ./models/model.bin.gz ]; then
+              echo "[OK] KataGo model present"
+            else
+              echo "[FAIL] KataGo model missing" >&2
+              exit 1
+            fi
+
+            # Pikafish is skipped on FreeBSD — just confirm no crash
+            echo "[OK] Pikafish gracefully skipped on FreeBSD"
+
+            # Quick smoke-test: KataGo responds to GTP 'name' command
+            echo "name" | timeout 30 ./katago_bin/katago gtp \
+              -model ./models/model.bin.gz \
+              -config ./config/gtp.cfg 2>/dev/null | grep -i "katago" \
+              && echo "[OK] KataGo GTP smoke test passed" \
+              || { echo "[FAIL] KataGo GTP smoke test failed" >&2; exit 1; }
+
+            echo ""
+            echo "===== Python tests ====="
+
+            # Create venv (start.sh expects .venv or venv)
+            python3 -m venv .venv
+            .venv/bin/pip install -r requirements.txt --quiet
+
+            # Run tests — skip ones requiring 'requests' or a live server
+            .venv/bin/python -m pytest \
+              tests/test_api.py \
+              tests/test_auth.py \
+              tests/test_game_history.py \
+              tests/test_chess.py \
+              -v --tb=short
+
+            echo ""
+            echo "===== All checks passed ====="
