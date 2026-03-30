@@ -127,6 +127,75 @@ install_model() {
   echo "==> Model saved to $MODEL_DIR/model.bin.gz"
 }
 
+# ── Pikafish (Chinese Chess engine) ───────────────────────────────────────
+install_pikafish() {
+  PIKAFISH_DIR="./pikafish_bin"
+  mkdir -p "$PIKAFISH_DIR"
+
+  if [ -f "$PIKAFISH_DIR/pikafish" ]; then
+    echo "==> Pikafish binary already exists, skipping."
+  else
+    echo "==> Fetching latest Pikafish release info..."
+    RELEASE_JSON=$(curl -sf "https://api.github.com/repos/official-pikafish/Pikafish/releases/latest" || echo "")
+    if [ -z "$RELEASE_JSON" ]; then
+      echo "WARNING: Could not reach GitHub API — skipping Pikafish download." >&2
+      return
+    fi
+
+    TAG=$(echo "$RELEASE_JSON" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+    echo "==> Latest Pikafish release: $TAG"
+
+    # Pick the right binary for the platform
+    case "$OS" in
+      Linux)
+        case "$ARCH" in
+          x86_64) ASSET="pikafish-linux-x86-64-modern" ;;
+          aarch64|arm64) ASSET="pikafish-linux-armv8" ;;
+          *) echo "WARNING: Unknown Linux arch $ARCH — skipping Pikafish." >&2; return ;;
+        esac ;;
+      Darwin)
+        case "$ARCH" in
+          arm64) ASSET="pikafish-macos-apple-silicon" ;;
+          x86_64) ASSET="pikafish-macos-x86-64-modern" ;;
+          *) echo "WARNING: Unknown macOS arch $ARCH — skipping Pikafish." >&2; return ;;
+        esac ;;
+      *) echo "WARNING: Unsupported OS $OS — skipping Pikafish." >&2; return ;;
+    esac
+
+    BIN_URL="https://github.com/official-pikafish/Pikafish/releases/download/${TAG}/${ASSET}"
+    echo "==> Downloading Pikafish binary ($ASSET)..."
+    if curl -L --retry 3 --retry-delay 2 -o "$PIKAFISH_DIR/pikafish" "$BIN_URL"; then
+      chmod +x "$PIKAFISH_DIR/pikafish"
+      echo "==> Pikafish binary saved to $PIKAFISH_DIR/pikafish"
+    else
+      echo "WARNING: Failed to download Pikafish binary." >&2
+      rm -f "$PIKAFISH_DIR/pikafish"
+      return
+    fi
+  fi
+
+  if [ -f "$PIKAFISH_DIR/pikafish.nnue" ]; then
+    echo "==> Pikafish NNUE model already exists, skipping."
+    return
+  fi
+
+  # Derive model URL from release assets (look for *.nnue)
+  NNUE_URL=$(echo "$RELEASE_JSON" | grep '"browser_download_url"' | grep '\.nnue"' | head -1 \
+             | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/' || echo "")
+  if [ -z "$NNUE_URL" ]; then
+    echo "WARNING: Could not find .nnue asset in release — Pikafish will use built-in eval." >&2
+    return
+  fi
+
+  echo "==> Downloading Pikafish NNUE model..."
+  if curl -L --retry 3 --retry-delay 2 -o "$PIKAFISH_DIR/pikafish.nnue" "$NNUE_URL"; then
+    echo "==> NNUE model saved to $PIKAFISH_DIR/pikafish.nnue"
+  else
+    echo "WARNING: Failed to download NNUE model — Pikafish will use built-in eval." >&2
+    rm -f "$PIKAFISH_DIR/pikafish.nnue"
+  fi
+}
+
 # ── Python deps ────────────────────────────────────────────────────────────
 install_python() {
   echo "==> Installing Python dependencies..."
@@ -155,6 +224,7 @@ setup_env() {
 install_deps
 install_katago
 install_model
+install_pikafish
 install_python
 setup_env
 

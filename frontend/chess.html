@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>中国象棋</title>
+  <link rel="stylesheet" href="chess.css" />
+</head>
+<body>
+
+<div id="top-bar">
+  <a href="/" class="back-link">← 围棋</a>
+  <h1>中国象棋</h1>
+</div>
+
+<!-- Setup panel -->
+<div id="setup-panel">
+  <div class="setup-card">
+    <h2>新对局</h2>
+
+    <div class="field-row">
+      <label>对局模式</label>
+      <div class="btn-group" id="mode-group">
+        <button class="tog active" data-value="vs_ai">人机对战</button>
+        <button class="tog" data-value="vs_human">双人对战</button>
+      </div>
+    </div>
+
+    <div class="field-row" id="color-row">
+      <label>执棋颜色</label>
+      <div class="btn-group" id="color-group">
+        <button class="tog active" data-value="red">红方（先手）</button>
+        <button class="tog" data-value="black">黑方（后手）</button>
+      </div>
+    </div>
+
+    <div class="field-row" id="diff-row">
+      <label>AI 难度</label>
+      <div class="btn-group" id="diff-group">
+        <button class="tog" data-value="easy">简单</button>
+        <button class="tog active" data-value="medium">中等</button>
+        <button class="tog" data-value="hard">困难</button>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label>起始局面</label>
+      <div class="btn-group" id="start-group">
+        <button class="tog active" data-value="standard">标准开局</button>
+        <button class="tog" data-value="fen">导入 FEN</button>
+      </div>
+    </div>
+
+    <div id="fen-row" class="field-row hidden">
+      <label>FEN 字符串</label>
+      <textarea id="fen-input" rows="2" spellcheck="false"
+        placeholder="rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1"></textarea>
+      <p id="fen-error" class="fen-error hidden"></p>
+      <p class="fen-hint">行棋方：<strong id="fen-turn-label">—</strong></p>
+    </div>
+
+    <button id="btn-start" class="btn-primary-lg">开始游戏</button>
+  </div>
+</div>
+
+<!-- Game area -->
+<div id="game-area" class="hidden">
+  <div id="status-bar">
+    <span id="status-text">红方走棋</span>
+    <span id="check-badge" class="hidden">将军！</span>
+  </div>
+  <div id="engine-badge"></div>
+
+  <div id="board-wrap">
+    <canvas id="board"></canvas>
+  </div>
+
+  <div id="controls">
+    <button id="btn-undo" class="ctrl-btn">悔棋</button>
+    <button id="btn-new"  class="ctrl-btn">新对局</button>
+  </div>
+
+  <div id="result-overlay" class="hidden">
+    <div id="result-box">
+      <div id="result-text"></div>
+      <button id="btn-result-new" class="btn-primary-lg">再来一局</button>
+    </div>
+  </div>
+</div>
+
+<script src="chess.js"></script>
+</body>
+</html>

@@ -866,6 +866,277 @@ def api_get_my_game(game_id: int):
 
 
 # ------------------------------------------------------------------ #
+# Chinese Chess (象棋) routes
+# ------------------------------------------------------------------ #
+
+import chess_engine as ce
+from pikafish_uci import PikafishUCI, PikafishError
+
+# Single global Pikafish instance (started lazily at first chess game if binary exists)
+pikafish: PikafishUCI | None = None
+
+
+def _ensure_pikafish():
+    """Start Pikafish if the binary is present and it isn't running yet."""
+    global pikafish
+    if pikafish is None:
+        pikafish = PikafishUCI()
+    if pikafish.is_available() and not pikafish.is_running():
+        try:
+            pikafish.start()
+        except PikafishError as e:
+            logger.warning("Could not start Pikafish: %s", e)
+    return pikafish
+
+
+def _chess_state():
+    return session.get("chess")
+
+
+def _chess_public(cs):
+    """Return the serialisable state dict sent to the client."""
+    board = cs["board"]
+    red_turn = cs["turn"] == "red"
+    # Compute valid moves for the side whose turn it is
+    valid = {}
+    if not cs["game_over"]:
+        for mv_from, mv_to in ce.legal_moves(board, red_turn):
+            key = f"{mv_from[0]},{mv_from[1]}"
+            valid.setdefault(key, [])
+            valid[key].append(list(mv_to))
+    pf = pikafish
+    engine = "Pikafish" if (pf and pf.is_running()) else "内置引擎"
+    return {
+        "board": board,
+        "turn": cs["turn"],
+        "mode": cs["mode"],
+        "humanColor": cs.get("human_color", "red"),
+        "difficulty": cs.get("difficulty", "medium"),
+        "gameOver": cs["game_over"],
+        "result": cs.get("result"),
+        "resultText": cs.get("result_text", ""),
+        "inCheck": ce.in_check(board, red_turn) if not cs["game_over"] else False,
+        "lastMove": cs.get("last_move"),
+        "validMoves": valid,
+        "engine": engine,
+    }
+
+
+def _check_game_over(cs):
+    board = cs["board"]
+    red_turn = cs["turn"] == "red"
+    moves = ce.legal_moves(board, red_turn)
+    if moves:
+        return
+    # No legal moves → current side loses
+    loser = cs["turn"]
+    winner = "black" if loser == "red" else "red"
+    cs["game_over"] = True
+    cs["result"] = f"{winner}_win"
+    if ce.in_check(board, red_turn):
+        cs["result_text"] = f"将死！{'红方' if winner == 'red' else '黑方'}胜"
+    else:
+        cs["result_text"] = f"困毙！{'红方' if winner == 'red' else '黑方'}胜"
+
+
+@app.route("/chess")
+def chess_index():
+    return send_from_directory("frontend", "chess.html")
+
+
+@app.route("/chess/api/engine_status", methods=["GET"])
+def chess_engine_status():
+    pf = _ensure_pikafish()
+    return jsonify({
+        "pikafish_available": pf.is_available(),
+        "pikafish_running":   pf.is_running(),
+        "engine": "Pikafish" if pf.is_running() else "内置引擎",
+    })
+
+
+@app.route("/chess/api/validate_fen", methods=["POST"])
+def chess_validate_fen():
+    data = request.get_json(silent=True) or {}
+    fen = data.get("fen", "").strip()
+    if not fen:
+        return jsonify({"error": "FEN 不能为空"}), 400
+    try:
+        board, red_turn = ce.fen_to_board(fen)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"status": "ok", "turn": "red" if red_turn else "black"})
+
+
+@app.route("/chess/api/new_game", methods=["POST"])
+def chess_new_game():
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "vs_ai")
+    human_color = data.get("human_color", "red")
+    difficulty = data.get("difficulty", "medium")
+    fen = data.get("fen", "").strip()
+
+    # Parse board position
+    if fen:
+        try:
+            board, red_turn = ce.fen_to_board(fen)
+        except ValueError as e:
+            return jsonify({"error": f"FEN 错误：{e}"}), 400
+        initial_turn = "red" if red_turn else "black"
+    else:
+        board = ce.initial_board()
+        initial_turn = "red"
+
+    # Ensure Pikafish is running; signal new game to clear hash
+    pf = _ensure_pikafish()
+    if pf.is_running():
+        pf.new_game()
+
+    cs = {
+        "board": board,
+        "turn": initial_turn,
+        "mode": mode,
+        "human_color": human_color,
+        "difficulty": difficulty,
+        "game_over": False,
+        "result": None,
+        "result_text": "",
+        "last_move": None,
+        "history": [],
+    }
+    session["chess"] = cs
+
+    # If vs_ai and it's already the AI's turn, let AI move first
+    if mode == "vs_ai":
+        ai_is_red = (human_color == "black")
+        ai_turn_now = (cs["turn"] == "red") == ai_is_red
+        if ai_turn_now:
+            _ai_play(cs)
+            session["chess"] = cs
+
+    return jsonify({"status": "ok", **_chess_public(cs)})
+
+
+@app.route("/chess/api/state", methods=["GET"])
+def chess_state():
+    cs = _chess_state()
+    if not cs:
+        return jsonify({"error": "no game"}), 404
+    return jsonify(_chess_public(cs))
+
+
+def _ai_play(cs):
+    """Let the AI make one move, mutates cs in place."""
+    board = cs["board"]
+    ai_red = cs["human_color"] == "black"   # AI is red when human is black
+    difficulty = cs.get("difficulty", "medium")
+
+    # Try Pikafish first; fall back to built-in minimax
+    move = None
+    pf = _ensure_pikafish()
+    if pf.is_running():
+        try:
+            result = pf.get_move(board, ai_red, difficulty)
+            if result:
+                fr2, fc2, tr2, tc2 = result
+                move = ((fr2, fc2), (tr2, tc2))
+        except Exception as e:
+            logger.warning("Pikafish move failed (%s), falling back to minimax", e)
+
+    if move is None:
+        move = ce.get_ai_move(board, ai_red, difficulty)
+
+    if move is None:
+        return
+    (fr, fc), (tr, tc) = move
+    cs["history"].append({
+        "board": [row[:] for row in board],
+        "turn": cs["turn"],
+        "last_move": cs.get("last_move"),
+    })
+    cs["board"] = ce.apply_move(board, fr, fc, tr, tc)
+    cs["turn"] = "black" if cs["turn"] == "red" else "red"
+    cs["last_move"] = [fr, fc, tr, tc]
+    _check_game_over(cs)
+
+
+@app.route("/chess/api/move", methods=["POST"])
+def chess_move():
+    cs = _chess_state()
+    if not cs:
+        return jsonify({"error": "no game"}), 404
+    if cs["game_over"]:
+        return jsonify({"error": "game over"}), 400
+
+    data = request.get_json(silent=True) or {}
+    try:
+        fr, fc, tr, tc = int(data["fr"]), int(data["fc"]), int(data["tr"]), int(data["tc"])
+    except (KeyError, ValueError):
+        return jsonify({"error": "invalid request"}), 400
+
+    board = cs["board"]
+    red_turn = cs["turn"] == "red"
+
+    # Validate move
+    if cs["mode"] == "vs_ai":
+        human_red = cs["human_color"] == "red"
+        if red_turn != human_red:
+            return jsonify({"error": "not your turn"}), 400
+
+    piece = board[fr][fc]
+    if not piece:
+        return jsonify({"error": "empty square"}), 400
+    if (red_turn and piece < 0) or (not red_turn and piece > 0):
+        return jsonify({"error": "wrong piece color"}), 400
+
+    legal = ce.legal_moves_from(board, fr, fc)
+    if (tr, tc) not in legal:
+        return jsonify({"error": "illegal move"}), 400
+
+    # Apply human move
+    cs["history"].append({
+        "board": [row[:] for row in board],
+        "turn": cs["turn"],
+        "last_move": cs.get("last_move"),
+    })
+    cs["board"] = ce.apply_move(board, fr, fc, tr, tc)
+    cs["turn"] = "black" if cs["turn"] == "red" else "red"
+    cs["last_move"] = [fr, fc, tr, tc]
+    _check_game_over(cs)
+
+    # AI responds in vs_ai mode
+    if not cs["game_over"] and cs["mode"] == "vs_ai":
+        _ai_play(cs)
+
+    session["chess"] = cs
+    return jsonify({"status": "ok", **_chess_public(cs)})
+
+
+@app.route("/chess/api/undo", methods=["POST"])
+def chess_undo():
+    cs = _chess_state()
+    if not cs:
+        return jsonify({"error": "no game"}), 404
+
+    history = cs.get("history", [])
+    steps = 2 if cs["mode"] == "vs_ai" else 1
+    steps = min(steps, len(history))
+    if steps == 0:
+        return jsonify({"error": "nothing to undo"}), 400
+
+    for _ in range(steps):
+        snap = history.pop()
+        cs["board"] = snap["board"]
+        cs["turn"] = snap["turn"]
+        cs["last_move"] = snap["last_move"]
+
+    cs["game_over"] = False
+    cs["result"] = None
+    cs["result_text"] = ""
+    session["chess"] = cs
+    return jsonify({"status": "ok", **_chess_public(cs)})
+
+
+# ------------------------------------------------------------------ #
 # Entry point
 # ------------------------------------------------------------------ #
 
