@@ -1,0 +1,68 @@
+name: Test setup.sh on Ubuntu
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  setup-ubuntu:
+    name: Ubuntu 24.04 – full setup + tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install p7zip (needed for Pikafish)
+        run: sudo apt-get update && sudo apt-get install -y p7zip-full
+
+      - name: Run setup.sh
+        run: sudo sh setup.sh
+
+      - name: Verify KataGo binary
+        run: |
+          if [ -x ./katago_bin/katago ]; then
+            echo "[OK] KataGo binary present and executable"
+          else
+            echo "[FAIL] KataGo binary missing or not executable" >&2
+            exit 1
+          fi
+
+      - name: Verify KataGo model
+        run: |
+          if [ -f ./models/model.bin.gz ]; then
+            echo "[OK] KataGo model present"
+          else
+            echo "[FAIL] KataGo model missing" >&2
+            exit 1
+          fi
+
+      - name: Verify Pikafish
+        run: |
+          if [ -x ./pikafish_bin/pikafish ] && [ -f ./pikafish_bin/pikafish.nnue ]; then
+            echo "[OK] Pikafish binary and NNUE model present"
+          else
+            echo "[FAIL] Pikafish files missing" >&2
+            exit 1
+          fi
+
+      - name: KataGo GTP smoke test
+        run: |
+          echo "name" | timeout 30 ./katago_bin/katago gtp \
+            -model ./models/model.bin.gz \
+            -config ./config/gtp.cfg 2>/dev/null | grep -i "katago" \
+            && echo "[OK] KataGo GTP smoke test passed" \
+            || { echo "[FAIL] KataGo GTP smoke test failed" >&2; exit 1; }
+
+      - name: Run Python tests
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements.txt --quiet
+          .venv/bin/python -m pytest \
+            tests/test_api.py \
+            tests/test_auth.py \
+            tests/test_game_history.py \
+            tests/test_chess.py \
+            -v --tb=short
